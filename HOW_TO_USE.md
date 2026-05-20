@@ -95,21 +95,20 @@ luagraph status --project-root /path/to/your/lua/project
 ### 4. 完整工作流示例
 
 ```bash
-# 对 LuaGraph 项目自身的 Systems/ 做完整分析
-cd /Users/bole/dev/mul-agents/LuaGraph/agents-hub
+# 进入 LuaGraph 项目根
+cd /path/to/luagraph
 
 # 构建
 pnpm run build
 
 # 初始化
-node dist/cli.js init /Users/bole/dev/mul-agents/LuaGraph
+node dist/cli.js init .
 
 # 索引
-node dist/cli.js index /Users/bole/dev/mul-agents/LuaGraph --force --format json
+node dist/cli.js index . --force --format json
 
 # 验证当前目录
-cd /Users/bole/dev/mul-agents/LuaGraph
-node /Users/bole/dev/mul-agents/LuaGraph/agents-hub/dist/cli.js status
+node dist/cli.js status
 ```
 
 ## 验证
