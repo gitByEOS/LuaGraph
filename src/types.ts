@@ -148,3 +148,16 @@ export type LuaGraphQueryResult = {
   readonly nodes: readonly QueryNode[];
   readonly edges: readonly QueryCallEdge[];
 };
+
+export type ImpactSeed = QuerySymbolNode;
+
+export type LuaGraphImpactResult = {
+  readonly projectRoot: string;
+  readonly input: string;
+  readonly depth: number;
+  readonly seeds: readonly ImpactSeed[];
+  readonly count: number;
+  readonly nodes: readonly QuerySymbolNode[];
+  readonly files: readonly string[];
+  readonly edges: readonly QueryCallEdge[];
+};
