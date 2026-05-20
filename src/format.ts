@@ -33,11 +33,35 @@ export function formatImpactResult(result: LuaGraphImpactResult, format: GraphOu
 }
 
 function formatQueryTable(result: LuaGraphQueryResult): string {
+  const relation = parseRelationExpression(result.expression);
+
+  if (relation !== undefined) {
+    const title = relation.key === "callers" ? "Caller" : "Callee";
+    const rows = getRelationRows(relation.key, getSymbolNodes(result.nodes), result.edges).map(({ edge, node }) => [
+      node.qualifiedName,
+      node.kind,
+      node.filePath,
+      edge.line,
+      edge.column,
+    ]);
+    const target = formatTargetSummary(relation.value, getRelationRoots(relation.key, result.nodes, result.edges)[0]);
+
+    return [renderAsciiTable([title, "Kind", "File", "Line", "Col"], rows), `${rows.length} rows, target: ${target}`].join(
+      "\n",
+    );
+  }
+
+  const rows = result.nodes.map((node) => {
+    if (node.type === "File") {
+      return [node.path, node.kind, node.path, "", ""];
+    }
+
+    return [node.qualifiedName, node.kind, node.filePath, node.startLine, node.signature];
+  });
+
   return [
-    tableRow(["expression", result.expression]),
-    tableRow(["count", result.count]),
-    queryTableHeader(),
-    ...result.nodes.map(formatQueryNodeTableRow),
+    renderAsciiTable(["Name", "Kind", "File", "Line", "Signature"], rows),
+    `${rows.length} rows, target: ${result.expression}`,
   ].join("\n");
 }
 
@@ -45,95 +69,172 @@ function formatQueryTree(result: LuaGraphQueryResult): string {
   const relation = parseRelationExpression(result.expression);
 
   if (relation === undefined) {
-    return [result.expression, ...result.nodes.map((node) => `  ${formatQueryNodeLine(node)}`)].join(
-      "\n",
-    );
+    return [result.expression, ...result.nodes.map((node) => `  ${formatQueryNodeLine(node)}`)].join("\n");
   }
 
   const nodes = getSymbolNodes(result.nodes);
-  const lines = [`${relation.key}:${relation.value}`];
-  const visited = new Set<string>();
-  const rootId = relation.key === "callers" ? "callers-root" : "callees-root";
+  const roots = getRelationRoots(relation.key, result.nodes, result.edges);
 
-  appendRelationChildren(lines, relation.key, rootId, nodes, result.edges, visited, 1);
-  return lines.join("\n");
+  if (roots.length === 0) {
+    return formatTargetRoot(relation.value, undefined);
+  }
+
+  return roots
+    .map((root) => renderRelationTree(relation.key, formatTargetRoot(relation.value, root), root.id, nodes, result.edges))
+    .join("\n\n");
 }
 
 function formatImpactTable(result: LuaGraphImpactResult): string {
   return [
-    tableRow(["input", result.input]),
-    tableRow(["depth", result.depth]),
-    tableRow(["count", result.count]),
+    `input: ${result.input}`,
+    `depth: ${result.depth}`,
+    `count: ${result.count}`,
+    "",
     "seeds",
-    symbolTableHeader(),
-    ...result.seeds.map(formatSymbolTableRow),
+    renderAsciiTable(["Name", "Kind", "File", "Line", "Signature"], result.seeds.map(toSymbolTableCells)),
+    `${result.seeds.length} rows`,
+    "",
     "affected",
-    symbolTableHeader(),
-    ...result.nodes.map(formatSymbolTableRow),
+    renderAsciiTable(["Name", "Kind", "File", "Line", "Signature"], result.nodes.map(toSymbolTableCells)),
+    `${result.nodes.length} rows`,
+    "",
     "files",
-    "path",
-    ...result.files,
+    renderAsciiTable(["Path"], result.files.map((file) => [file])),
+    `${result.files.length} rows`,
   ].join("\n");
 }
 
 function formatImpactTree(result: LuaGraphImpactResult): string {
-  const nodes = new Map(result.nodes.map((node) => [node.id, node]));
-  const lines = [`impact:${result.input} depth=${result.depth}`];
-  const visited = new Set(result.seeds.map((seed) => seed.id));
+  const nodes = new Map([...result.seeds, ...result.nodes].map((node) => [node.id, node]));
 
-  for (const seed of [...result.seeds].sort(compareSymbols)) {
-    lines.push(`  ${formatSymbolLine(seed)}`);
-    appendImpactCallers(lines, seed.id, nodes, result.edges, visited, 2);
+  if (result.seeds.length === 0) {
+    return formatTargetRoot(result.input, undefined);
   }
+
+  return [...result.seeds]
+    .sort(compareSymbols)
+    .map((seed) => renderRelationTree("callers", formatSymbolRoot(seed), seed.id, nodes, result.edges))
+    .join("\n\n");
+}
+
+type TableValue = number | string;
+
+type RelationRoot = {
+  readonly id: string;
+  readonly filePath?: string;
+  readonly line?: number;
+};
+
+type RelationRow = {
+  readonly node: QuerySymbolNode;
+  readonly edge: QueryCallEdge;
+};
+
+type TreeNode = {
+  readonly label: string;
+  readonly children: readonly TreeNode[];
+};
+
+function renderAsciiTable(headers: readonly string[], rows: readonly (readonly TableValue[])[]): string {
+  const stringRows = rows.map((row) => row.map(String));
+  const widths = headers.map((header, index) =>
+    Math.max(asciiWidth(header), ...stringRows.map((row) => asciiWidth(row[index] ?? ""))),
+  );
+  const border = renderTableBorder(widths);
+  const lines = [
+    border,
+    renderTableRow(headers, widths),
+    border,
+    ...stringRows.map((row) => renderTableRow(row, widths)),
+    border,
+  ];
 
   return lines.join("\n");
 }
 
-function appendRelationChildren(
-  lines: string[],
+function renderTableBorder(widths: readonly number[]): string {
+  return `+${widths.map((width) => "-".repeat(width + 2)).join("+")}+`;
+}
+
+function renderTableRow(values: readonly string[], widths: readonly number[]): string {
+  return `| ${widths.map((width, index) => padAscii(values[index] ?? "", width)).join(" | ")} |`;
+}
+
+function padAscii(value: string, width: number): string {
+  return value + " ".repeat(Math.max(0, width - asciiWidth(value)));
+}
+
+function asciiWidth(value: string): number {
+  return value.length;
+}
+
+function renderRelationTree(
   relation: "callers" | "callees",
+  rootLabel: string,
+  rootId: string,
+  nodes: Map<string, QuerySymbolNode>,
+  edges: readonly QueryCallEdge[],
+): string {
+  return renderTree(buildRelationTree(relation, rootLabel, rootId, nodes, edges, new Set([rootId])));
+}
+
+function buildRelationTree(
+  relation: "callers" | "callees",
+  label: string,
   originId: string,
   nodes: Map<string, QuerySymbolNode>,
   edges: readonly QueryCallEdge[],
-  visited: Set<string>,
-  depth: number,
-): void {
-  const children = getRelationChildren(relation, originId, nodes, edges);
+  path: ReadonlySet<string>,
+): TreeNode {
+  const children = getRelationChildren(relation, originId, nodes, edges).map(({ edge, node }) =>
+    buildRelationChild(relation, edge, node, nodes, edges, path),
+  );
 
-  for (const child of children) {
-    const marker = visited.has(child.node.id) ? " (cycle)" : "";
-    lines.push(`${"  ".repeat(depth)}${formatSymbolLine(child.node)}${marker}`);
-
-    if (!visited.has(child.node.id)) {
-      visited.add(child.node.id);
-      appendRelationChildren(lines, relation, child.node.id, nodes, edges, visited, depth + 1);
-    }
-  }
+  return { label, children };
 }
 
-function appendImpactCallers(
-  lines: string[],
-  targetId: string,
+function buildRelationChild(
+  relation: "callers" | "callees",
+  edge: QueryCallEdge,
+  node: QuerySymbolNode,
   nodes: Map<string, QuerySymbolNode>,
   edges: readonly QueryCallEdge[],
-  visited: Set<string>,
-  depth: number,
-): void {
-  const callers = edges
-    .filter((edge) => edge.target === targetId)
-    .map((edge) => nodes.get(edge.source))
-    .filter(isSymbolNode)
-    .sort(compareSymbols);
+  path: ReadonlySet<string>,
+): TreeNode {
+  const prefix = relation === "callers" ? "called by" : "calls";
+  const marker = path.has(node.id) ? " (cycle)" : "";
+  const label = `${prefix} ${formatCallableName(node.qualifiedName)} [${node.filePath}:${edge.line}]${marker}`;
 
-  for (const caller of callers) {
-    const marker = visited.has(caller.id) ? " (cycle)" : "";
-    lines.push(`${"  ".repeat(depth)}${formatSymbolLine(caller)}${marker}`);
-
-    if (!visited.has(caller.id)) {
-      visited.add(caller.id);
-      appendImpactCallers(lines, caller.id, nodes, edges, visited, depth + 1);
-    }
+  if (path.has(node.id)) {
+    return { label, children: [] };
   }
+
+  return buildRelationTree(relation, label, node.id, nodes, edges, new Set([...path, node.id]));
+}
+
+function renderTree(root: TreeNode): string {
+  return [root.label, ...renderTreeChildren(root.children, "")].join("\n");
+}
+
+function renderTreeChildren(children: readonly TreeNode[], prefix: string): string[] {
+  return children.flatMap((child, index) => {
+    const isLast = index === children.length - 1;
+    const connector = isLast ? "└── " : "├── ";
+    const childPrefix = `${prefix}${isLast ? "    " : "│   "}`;
+
+    return [`${prefix}${connector}${child.label}`, ...renderTreeChildren(child.children, childPrefix)];
+  });
+}
+
+function getRelationRows(
+  relation: "callers" | "callees",
+  nodes: Map<string, QuerySymbolNode>,
+  edges: readonly QueryCallEdge[],
+): RelationRow[] {
+  return edges
+    .map((edge) => ({ edge, node: nodes.get(relation === "callers" ? edge.source : edge.target) }))
+    .filter((entry): entry is RelationRow => isSymbolNode(entry.node))
+    .sort((left, right) => compareSymbols(left.node, right.node));
 }
 
 function getRelationChildren(
@@ -141,27 +242,48 @@ function getRelationChildren(
   originId: string,
   nodes: Map<string, QuerySymbolNode>,
   edges: readonly QueryCallEdge[],
-): { readonly node: QuerySymbolNode; readonly edge: QueryCallEdge }[] {
+): RelationRow[] {
   return edges
-    .filter((edge) => isRelationEdge(relation, edge, originId, nodes))
+    .filter((edge) => (relation === "callers" ? edge.target === originId : edge.source === originId))
     .map((edge) => ({ edge, node: nodes.get(relation === "callers" ? edge.source : edge.target) }))
-    .filter((entry): entry is { readonly node: QuerySymbolNode; readonly edge: QueryCallEdge } =>
-      isSymbolNode(entry.node),
-    )
+    .filter((entry): entry is RelationRow => isSymbolNode(entry.node))
     .sort((left, right) => compareSymbols(left.node, right.node));
 }
 
-function isRelationEdge(
+function getRelationRoots(
   relation: "callers" | "callees",
-  edge: QueryCallEdge,
-  originId: string,
-  nodes: Map<string, QuerySymbolNode>,
-): boolean {
-  if (relation === "callers") {
-    return edge.target === originId || (originId === "callers-root" && !nodes.has(edge.target));
+  nodes: readonly QueryNode[],
+  edges: readonly QueryCallEdge[],
+): RelationRoot[] {
+  const symbols = getSymbolNodes(nodes);
+  const rootIds = [
+    ...new Set(
+      edges
+        .map((edge) => (relation === "callers" ? edge.target : edge.source))
+        .filter((id) => !symbols.has(id)),
+    ),
+  ].sort();
+
+  return rootIds.map(toRelationRoot);
+}
+
+function toRelationRoot(id: string): RelationRoot {
+  const parsed = parseSymbolId(id);
+
+  return parsed === undefined ? { id } : { id, filePath: parsed.filePath, line: parsed.line };
+}
+
+function parseSymbolId(id: string): { readonly filePath: string; readonly line: number } | undefined {
+  const locationIndex = id.lastIndexOf("#");
+  const location = locationIndex === -1 ? "" : id.slice(locationIndex + 1);
+  const separatorIndex = location.indexOf(":");
+  const line = Number(location.slice(0, separatorIndex));
+
+  if (locationIndex === -1 || separatorIndex === -1 || !Number.isInteger(line)) {
+    return undefined;
   }
 
-  return edge.source === originId || (originId === "callees-root" && !nodes.has(edge.source));
+  return { filePath: id.slice(0, id.indexOf("#")), line };
 }
 
 function parseRelationExpression(
@@ -209,32 +331,28 @@ function formatQueryNodeLine(node: QueryNode): string {
   return formatSymbolLine(node);
 }
 
-function formatQueryNodeTableRow(node: QueryNode): string {
-  if (node.type === "File") {
-    return tableRow([node.type, node.kind, node.path, "", "", ""]);
-  }
-
-  return tableRow([node.type, node.kind, node.filePath, node.startLine, node.qualifiedName, node.signature]);
-}
-
 function formatSymbolLine(node: QuerySymbolNode): string {
   return `${node.filePath}:${node.startLine} ${node.kind} ${node.qualifiedName} ${node.signature}`;
 }
 
-function formatSymbolTableRow(node: QuerySymbolNode): string {
-  return tableRow([node.type, node.kind, node.filePath, node.startLine, node.qualifiedName, node.signature]);
+function toSymbolTableCells(node: QuerySymbolNode): readonly TableValue[] {
+  return [node.qualifiedName, node.kind, node.filePath, node.startLine, node.signature];
 }
 
-function queryTableHeader(): string {
-  return tableRow(["type", "kind", "path/filePath", "line", "qualifiedName", "signature"]);
+function formatSymbolRoot(node: QuerySymbolNode): string {
+  return `${formatCallableName(node.qualifiedName)}  (${node.filePath}:${node.startLine})`;
 }
 
-function symbolTableHeader(): string {
-  return tableRow(["type", "kind", "filePath", "line", "qualifiedName", "signature"]);
+function formatTargetRoot(target: string, root: RelationRoot | undefined): string {
+  return `${formatCallableName(target)}${root?.filePath === undefined ? "" : `  (${root.filePath}:${root.line})`}`;
 }
 
-function tableRow(values: readonly (number | string)[]): string {
-  return values.map(String).join("\t");
+function formatTargetSummary(target: string, root: RelationRoot | undefined): string {
+  return `${target}${root?.filePath === undefined ? "" : ` (${root.filePath}:${root.line})`}`;
+}
+
+function formatCallableName(name: string): string {
+  return name.endsWith(")") ? name : `${name}()`;
 }
 
 function compareSymbols(left: QuerySymbolNode, right: QuerySymbolNode): number {

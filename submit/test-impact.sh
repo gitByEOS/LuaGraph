@@ -90,20 +90,21 @@ const assertIncludes = (content, expected) => {
   }
 };
 
-assertIncludes(queryTable, "expression\tcallers:leaf");
-assertIncludes(queryTable, "count\t2");
-assertIncludes(queryTable, "type\tkind\tpath/filePath\tline\tqualifiedName\tsignature");
-assertIncludes(queryTable, "Symbol\tfunction\tsrc/api.lua\t3\tmiddle\tfunction middle()");
-assertIncludes(queryTable, "Symbol\tfunction\tsrc/app.lua\t1\tappBoot\tfunction appBoot()");
+assertIncludes(queryTable, "| Caller  | Kind     | File        | Line | Col |");
+assertIncludes(queryTable, "| middle  | function | src/api.lua | 4    | 3   |");
+assertIncludes(queryTable, "| appBoot | function | src/app.lua | 2    | 3   |");
+assertIncludes(queryTable, "2 rows, target: leaf (src/api.lua:1)");
 
 if (
   JSON.stringify(names(queryJson)) !== JSON.stringify(["middle", "appBoot"]) ||
-  !queryTree.includes("  src/api.lua:3 function middle") ||
+  !queryTree.includes("leaf()  (src/api.lua:1)") ||
+  !queryTree.includes("└── called by middle() [src/api.lua:4]") ||
   JSON.stringify(names(impactJson)) !== JSON.stringify(["middle", "appBoot"]) ||
   JSON.stringify(impactJson.files) !== JSON.stringify(["src/api.lua", "src/app.lua"]) ||
   JSON.stringify(names(impactFileJson)) !== JSON.stringify(["appBoot", "root"]) ||
   JSON.stringify(names(impactDepthJson)) !== JSON.stringify(["middle"]) ||
-  !impactTree.includes("impact:leaf depth=2")
+  !impactTree.includes("leaf()  (src/api.lua:1)") ||
+  !impactTree.includes("└── called by middle() [src/api.lua:4]")
 ) {
   fail("JSON 或 tree 输出不符合预期");
 }
