@@ -19,7 +19,7 @@ export type {
   LuaGraphConfig,
   LuaSymbol,
   NormalizedPath,
-  ScannedLuaFile,
   SchemaStatement,
+  ScannedLuaFile,
   SymbolKind,
 } from "./types.js";

@@ -12,6 +12,7 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library 骨架，工具链使用 Vite+ 
 - `src/config.ts`：配置读写校验，默认读取 `.gitignore` 生成 exclude。
 - `src/path.ts`：Git 风格路径规范化和安全解析。
 - `src/store.ts`：Kuzu schema 入口占位。
+- `src/scanner.ts`：Lua 文件扫描，按 include/exclude 输出文件元数据。
 - `src/parser.ts`：Phase 1 Lua 符号最小提取，输出 File 与 Symbol 结构。
 - `src/init.ts`：初始化流程编排入口占位。
 - `test/`：最小测试，证明 `vp test` 可运行。
@@ -68,6 +69,19 @@ vp test test/store.test.ts
 vp check
 ```
 
+Scanner 模块验收：
+
+```bash
+submit/test-agent-scanner.sh
+```
+
+`submit/test-agent-scanner.sh` 会从自身位置定位项目根，并依次执行：
+
+```bash
+vp test test/scanner.test.ts
+vp check
+```
+
 Parser 模块验收：
 
 ```bash
@@ -105,16 +119,3 @@ node dist/cli.js init <tmp>
 ```
 
 并验证 `<tmp>/.luagraph/config.json` 与 `<tmp>/.luagraph/kuzu` 已创建。
-
-Scanner 模块验收：
-
-```bash
-submit/test-agent-scanner.sh
-```
-
-`submit/test-agent-scanner.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp test test/scanner.test.ts
-vp check
-```
