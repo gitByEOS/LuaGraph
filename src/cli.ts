@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 
 import { initializeProject } from "./init.js";
+import { getProjectStatus } from "./status.js";
 
 export function createCli(): Command {
   const program = new Command();
@@ -23,6 +24,29 @@ export function createCli(): Command {
 
       try {
         const result = await initializeProject(projectRoot);
+        console.log(JSON.stringify(result, null, 2));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+  program
+    .command("status")
+    .argument("[project_root]", "项目根目录")
+    .option("--project-root <path>", "项目根目录")
+    .description("统计 LuaGraph 项目状态")
+    .action(async (projectRoot?: string, options?: { readonly projectRoot?: string }) => {
+      const targetProjectRoot = projectRoot ?? options?.projectRoot;
+
+      if (targetProjectRoot === undefined || targetProjectRoot.length === 0) {
+        program.error(
+          "请指定项目路径：luagraph status <project_root> 或 luagraph status --project-root <path>",
+        );
+        return;
+      }
+
+      try {
+        const result = await getProjectStatus(targetProjectRoot);
         console.log(JSON.stringify(result, null, 2));
       } catch (error) {
         program.error(error instanceof Error ? error.message : String(error));

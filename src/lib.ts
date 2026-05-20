@@ -11,6 +11,7 @@ export { createInitPlan, initializeProject } from "./init.js";
 export { extractLuaSymbols, parseLuaFile } from "./parser.js";
 export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./path.js";
 export { scanLuaFiles } from "./scanner.js";
+export { getProjectStatus } from "./status.js";
 export { getKuzuDatabasePath, initializeStore, schemaStatements } from "./store.js";
 export type {
   InitPlan,
@@ -21,5 +22,6 @@ export type {
   NormalizedPath,
   SchemaStatement,
   ScannedLuaFile,
+  StatusResult,
   SymbolKind,
 } from "./types.js";

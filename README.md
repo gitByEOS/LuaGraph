@@ -8,12 +8,13 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library 骨架，工具链使用 Vite+ 
 
 - `src/cli.ts`：CLI 入口，预留 `luagraph init <project_root>` 命令。
 - `src/lib.ts`：公共库出口。
-- `src/types.ts`：v0.1.0 的配置、schema、路径和 init 类型。
+- `src/types.ts`：配置、schema、路径、init、扫描器和状态类型。
 - `src/config.ts`：配置读写校验，默认读取 `.gitignore` 生成 exclude。
 - `src/path.ts`：Git 风格路径规范化和安全解析。
 - `src/store.ts`：Kuzu schema 入口占位。
-- `src/scanner.ts`：Lua 文件扫描，按 include/exclude 输出文件元数据。
+- `src/scanner.ts`：按配置扫描 Lua 文件并返回仓库相对路径。
 - `src/parser.ts`：Phase 1 Lua 符号最小提取，输出 File 与 Symbol 结构。
+- `src/status.ts`：读取项目配置和 Kuzu 库，统计 File、Symbol 与关系数量。
 - `src/init.ts`：初始化流程编排入口占位。
 - `test/`：最小测试，证明 `vp test` 可运行。
 
@@ -119,3 +120,24 @@ node dist/cli.js init <tmp>
 ```
 
 并验证 `<tmp>/.luagraph/config.json` 与 `<tmp>/.luagraph/kuzu` 已创建。
+
+status 验收：
+
+```bash
+submit/test-agent-status.sh
+```
+
+`submit/test-agent-status.sh` 会从自身位置定位项目根，并依次执行：
+
+```bash
+vp test test/status.test.ts
+vp check
+vp run build
+```
+
+CLI 支持以下两种 status 调用方式：
+
+```bash
+luagraph status <project_root>
+luagraph status --project-root <path>
+```

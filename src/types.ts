@@ -56,3 +56,12 @@ export type InitResult = {
   readonly databaseDir: string;
   readonly schemaCount: number;
 };
+
+export type StatusResult = {
+  readonly fileCount: number;
+  readonly symbolCount: number;
+  readonly edgeCount: number;
+  readonly databaseDir: string;
+  readonly configPath: string;
+  readonly schemaCount: number;
+};
