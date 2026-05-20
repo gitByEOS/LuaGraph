@@ -33,133 +33,22 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library，用于扫描、解析 Lua 项
 
 ## 验收标准
 
-在项目根目录运行：
-
-```bash
-submit/test-agent-init.sh
-submit/test-agent-path.sh
-submit/test-agent-config.sh
-```
-
-`submit/test-agent-init.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp install
-vp test
-vp check
-```
-
-`submit/test-agent-path.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp test test/path.test.ts
-vp check
-```
-
-配置模块验收：
-
-```bash
-submit/test-agent-config.sh
-```
-
-`submit/test-agent-config.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp test test/config.test.ts
-vp check
-```
-
-Store 模块验收：
-
-```bash
-submit/test-agent-store.sh
-```
-
-`submit/test-agent-store.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp install
-vp test test/store.test.ts
-vp check
-```
-
-Scanner 模块验收：
-
-```bash
-submit/test-agent-scanner.sh
-```
-
-`submit/test-agent-scanner.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp test test/scanner.test.ts
-vp check
-```
-
-Parser 模块验收：
-
-```bash
-submit/test-agent-parser.sh
-```
-
-`src/parser.ts` 当前是 Phase 1 最小提取：使用行级模式识别 `ClassName = class("ClassName"...)`、`function A:B()`、`function foo()` 和 `local function foo()`，生成稳定 id：`<path>#<kind>#<qualifiedName>#<startLine>:<startColumn>`。它不读取业务 `Systems` 代码，不写数据库，也不伪装完整 AST；后续接入 `tree-sitter`/`tree-sitter-lua` 时再扩展完整语法树提取。
-
-`submit/test-agent-parser.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp test test/parser.test.ts
-vp check
-```
-
-init-real 验收：
-
-```bash
-submit/test-agent-init-real.sh
-```
-
-`submit/test-agent-init-real.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp install
-vp test
-vp check
-vp run build
-```
-
-随后脚本会在临时目录执行：
-
-```bash
-node dist/cli.js init <tmp>
-```
-
-并验证 `<tmp>/.luagraph/config.json` 与 `<tmp>/.luagraph/kuzu` 已创建。
-
-status 验收：
-
-```bash
-submit/test-agent-status.sh
-```
-
-`submit/test-agent-status.sh` 会从自身位置定位项目根，并依次执行：
-
-```bash
-vp test test/status.test.ts
-vp check
-vp run build
-```
-
-CLI 支持以下两种 status 调用方式：
-
-```bash
-luagraph status <project_root>
-luagraph status --project-root <path>
-```
+| 模块 | 验收脚本 | 验证内容 |
+|---|---|---|
+| Init | `submit/test-agent-init.sh` | `vp install && vp test && vp check` |
+| Path | `submit/test-agent-path.sh` | `vp test test/path.test.ts && vp check` |
+| Config | `submit/test-agent-config.sh` | `vp test test/config.test.ts && vp check` |
+| Store | `submit/test-agent-store.sh` | `vp install && vp test test/store.test.ts && vp check` |
+| Scanner | `submit/test-agent-scanner.sh` | `vp test test/scanner.test.ts && vp check` |
+| Parser | `submit/test-agent-parser.sh` | `vp test test/parser.test.ts && vp check` |
+| Init-real | `submit/test-agent-init-real.sh` | `vp install && vp test && vp check && vp run build`，然后 `node dist/cli.js init <tmp>` 验证 `.luagraph/` 创建 |
+| Status | `submit/test-agent-status.sh` | `vp test test/status.test.ts && vp check && vp run build`，CLI 支持 `luagraph status <project_root>` 和 `--project-root <path>` |
 
 ## 下一阶段：Systems/ 分析
 
 目标：使用已产出的工具链对 `Systems/` 目录下的真实业务代码进行完整分析，将 Lua 符号写入 Kuzu 图数据库。
 
-### Systems/ 概览
+共 18 个 Lua 文件，分布在 5 个系统：
 
 | 系统 | 文件数 | 说明 |
 |---|---|---|
@@ -168,29 +57,6 @@ luagraph status --project-root <path>
 | MissionBlitz | 2 | 任务突击系统 |
 | RecallSale | 1 | 召回促销系统 |
 | XtraSpinDialog | 1 | 额外旋转对话框 |
-
-共计 18 个 Lua 文件。
-
-### 验收标准
-
-```bash
-submit/test-agent-systems-analyze.sh
-```
-
-验收脚本依次执行：
-
-```bash
-# 1. 对 Systems/ 执行 init 初始化
-vp run build
-node dist/cli.js init <Systems_parent_dir>
-
-# 2. 扫描并解析所有 Lua 文件
-vp test test/systems.test.ts
-
-# 3. 验证 Kuzu 库中有 File、Symbol、关系数据
-node dist/cli.js status <Systems_parent_dir>
-# 输出 fileCount > 0, symbolCount > 0, edgeCount > 0
-```
 
 ### 任务拆分
 
