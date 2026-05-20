@@ -157,7 +157,7 @@ describe("luagraph index CLI", () => {
         "[index] 开始扫描 Lua 文件",
         "[index] 扫描到 1 个 Lua 文件",
         "[index] 开始索引 Lua 符号",
-        "[index] 已索引 1/1 个 Lua 文件",
+        "[index] 索引文件[1/1] player.lua ...",
         "[index] 完成统计：文件 1，符号 2，Contains 2",
       ]),
     );

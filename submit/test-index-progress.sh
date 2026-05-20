@@ -51,7 +51,7 @@ const expectedMessages = [
   "开始扫描 Lua 文件",
   "扫描到 1 个 Lua 文件",
   "开始索引 Lua 符号",
-  "已索引 1/1 个 Lua 文件",
+  "索引文件[1/1] player.lua ...",
   "完成统计：文件 1，符号 2，Contains 2",
 ];
 

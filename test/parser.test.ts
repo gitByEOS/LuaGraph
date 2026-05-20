@@ -97,4 +97,21 @@ describe("Lua parser Phase 1 最小提取", () => {
     expect(file.symbols[0]?.id).toBe("src/nested.lua#method#Player:enter#1:3");
     expect(file.symbols[0]?.startColumn).toBe(3);
   });
+
+  it("区分 class 声明和普通配置 table", () => {
+    const source = [
+      'Player = class("Player")',
+      "DinerConfig = {",
+      "  meditation = {",
+      "  }",
+      "}",
+    ].join("\n");
+
+    const file = parseLuaFile("src/config.lua", source);
+
+    expect(file.symbols.map((symbol) => [symbol.kind, symbol.qualifiedName])).toEqual([
+      ["class", "Player"],
+      ["table", "DinerConfig"],
+    ]);
+  });
 });

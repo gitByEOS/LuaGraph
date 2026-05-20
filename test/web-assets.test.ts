@@ -28,7 +28,11 @@ describe("serve 静态 Web 资产", () => {
     expect(css).toContain("--bg: #0f1117");
     expect(css).toContain("--surface: #111318");
     expect(css).toContain("height: 56px");
-    expect(css).toContain("grid-template-columns: 300px minmax(520px, 1fr) 340px");
+    expect(css).toContain("height: 2.4rem");
+    expect(css).toContain("grid-template-columns: 360px minmax(520px, 1fr) 340px");
+    expect(css).toContain("flex: 1 1 auto");
+    expect(css).toContain("appearance: none");
+    expect(css).toContain("select option");
     expect(css).toContain("background: #040810");
     expect(css).toContain("font-family: \"SFMono-Regular\"");
   });
@@ -45,6 +49,7 @@ describe("serve 静态 Web 资产", () => {
     expect(app).toContain("function fetchCodeSnippet(node)");
     expect(app).toContain("function applySearch()");
     expect(app).toContain("function scheduleSearch()");
+    expect(app).toContain("payload.code");
     expect(app).toContain("function renderGraph()");
     expect(app).toContain('edge.type === "Contains"');
     expect(app).toContain("searchableText(node)");

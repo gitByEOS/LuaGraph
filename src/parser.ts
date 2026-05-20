@@ -14,6 +14,7 @@ type SymbolDraft = {
 
 const classPattern =
   /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*class\s*\(\s*["'](?<literal>[A-Za-z_][A-Za-z0-9_]*)["']/;
+const tablePattern = /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\{|$)/;
 const functionPattern =
   /^(?<indent>\s*)(?<local>local\s+)?function\s+(?<qualifiedName>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/;
 
@@ -43,6 +44,11 @@ function parseLine(line: string, lineNumber: number): readonly SymbolDraft[] {
     return [classSymbol];
   }
 
+  const tableSymbol = parseTableLine(line, lineNumber);
+  if (tableSymbol !== undefined) {
+    return [tableSymbol];
+  }
+
   const functionSymbol = parseFunctionLine(line, lineNumber);
 
   return functionSymbol === undefined ? [] : [functionSymbol];
@@ -63,6 +69,34 @@ function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefin
 
   return {
     kind: "class",
+    name,
+    qualifiedName: name,
+    startLine: lineNumber,
+    startColumn: getDeclarationColumn(match.groups.indent),
+    endColumn: line.length,
+    signature: line.trim(),
+    isLocal: false,
+  };
+}
+
+function parseTableLine(line: string, lineNumber: number): SymbolDraft | undefined {
+  const match = tablePattern.exec(line);
+
+  if (match?.groups === undefined) {
+    return undefined;
+  }
+
+  if ((match.groups.indent ?? "").length > 0) {
+    return undefined;
+  }
+
+  const name = match.groups.name;
+  if (name === undefined) {
+    return undefined;
+  }
+
+  return {
+    kind: "table",
     name,
     qualifiedName: name,
     startLine: lineNumber,

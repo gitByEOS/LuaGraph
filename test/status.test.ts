@@ -43,24 +43,25 @@ describe("getProjectStatus", () => {
     await writeLuaFile(
       projectRoot,
       "src/player.lua",
-      'Player = class("Player")\nfunction Player:move()\nend\nfunction spawnPlayer()\nend\n',
+      'Player = class("Player")\nDinerConfig = {\n}\nfunction Player:move()\nend\nfunction spawnPlayer()\nend\n',
     );
     await initializeProject(projectRoot);
     await indexProject(projectRoot);
 
     await expect(getProjectStatus(projectRoot)).resolves.toMatchObject({
       fileCount: 1,
-      symbolCount: 3,
-      edgeCount: 3,
+      symbolCount: 4,
+      edgeCount: 4,
       parseErrorCount: 0,
       symbolKindCounts: {
         class: 1,
         function: 1,
         method: 1,
+        table: 1,
       },
       pendingSyncChangeCount: 0,
     });
-    await expect(readFileNodeCount(projectRoot, "src/player.lua")).resolves.toBe(3);
+    await expect(readFileNodeCount(projectRoot, "src/player.lua")).resolves.toBe(4);
   });
 
   it("统计新增修改删除的待同步 Lua 文件", async () => {

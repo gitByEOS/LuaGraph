@@ -558,6 +558,10 @@
       return payload.content;
     }
 
+    if (typeof payload.code === "string") {
+      return payload.code;
+    }
+
     if (Array.isArray(payload.lines)) {
       return payload.lines
         .map((line) => {

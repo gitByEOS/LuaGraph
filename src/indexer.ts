@@ -17,8 +17,6 @@ export type IndexProjectOptions = {
 
 export type IndexProgressReporter = (message: string) => void;
 
-const FILE_PROGRESS_INTERVAL = 25;
-
 export async function indexProject(
   projectRoot: string,
   options: IndexProjectOptions = {},
@@ -62,7 +60,7 @@ export async function indexProject(
 
       await insertContainsRelationships(connection, file.path, parsed.symbols);
       containsCount += parsed.symbols.length;
-      reportFileProgress(options, index + 1, files.length);
+      reportFileProgress(options, file.path, index + 1, files.length);
     }
   } finally {
     await connection.close();
@@ -82,12 +80,8 @@ export async function indexProject(
   };
 }
 
-function reportFileProgress(options: IndexProjectOptions, done: number, total: number): void {
-  if (done !== total && done % FILE_PROGRESS_INTERVAL !== 0) {
-    return;
-  }
-
-  reportProgress(options, `已索引 ${done}/${total} 个 Lua 文件`);
+function reportFileProgress(options: IndexProjectOptions, filePath: NormalizedPath, done: number, total: number): void {
+  reportProgress(options, `索引文件[${done}/${total}] ${nodePath.basename(filePath)} ...`);
 }
 
 function reportProgress(options: IndexProjectOptions, message: string): void {
