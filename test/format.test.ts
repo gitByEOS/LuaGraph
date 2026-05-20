@@ -13,12 +13,20 @@ describe("graph output formatters", () => {
   it("query table 输出适合终端阅读", () => {
     expect(formatQueryResult(createQueryResult(), "table")).toBe(
       [
-        "expression: callers:leaf",
-        "count: 2",
-        "src/api.lua:3 function middle function middle()",
-        "src/app.lua:1 function appBoot function appBoot()",
+        "expression\tcallers:leaf",
+        "count\t2",
+        "type\tkind\tpath/filePath\tline\tqualifiedName\tsignature",
+        "Symbol\tfunction\tsrc/api.lua\t3\tmiddle\tfunction middle()",
+        "Symbol\tfunction\tsrc/app.lua\t1\tappBoot\tfunction appBoot()",
       ].join("\n"),
     );
+  });
+
+  it("query table 空结果保留表头", () => {
+    const output = formatQueryResult({ ...createQueryResult(), count: 0, nodes: [], edges: [] }, "table");
+
+    expect(output).toContain("expression\tcallers:leaf");
+    expect(output).toContain("type\tkind\tpath/filePath\tline\tqualifiedName\tsignature");
   });
 
   it("query tree 按调用层级展示", () => {
@@ -33,9 +41,14 @@ describe("graph output formatters", () => {
 
   it("impact json/table/tree 都稳定输出", () => {
     const result = createImpactResult();
+    const tableOutput = formatImpactResult(result, "table");
 
     expect(JSON.parse(formatImpactResult(result, "json"))).toMatchObject({ input: "leaf", count: 2 });
-    expect(formatImpactResult(result, "table")).toContain("affected:\n  src/api.lua:3 function middle");
+    expect(tableOutput).toContain("input\tleaf");
+    expect(tableOutput).toContain("seeds\ntype\tkind\tfilePath\tline\tqualifiedName\tsignature");
+    expect(tableOutput).toContain("affected\ntype\tkind\tfilePath\tline\tqualifiedName\tsignature");
+    expect(tableOutput).toContain("Symbol\tfunction\tsrc/api.lua\t3\tmiddle\tfunction middle()");
+    expect(tableOutput).toContain("files\npath\nsrc/api.lua");
     expect(formatImpactResult(result, "tree")).toBe(
       [
         "impact:leaf depth=2",
@@ -44,6 +57,15 @@ describe("graph output formatters", () => {
         "      src/app.lua:1 function appBoot function appBoot()",
       ].join("\n"),
     );
+  });
+
+  it("impact table 空结果保留分段表头", () => {
+    const output = formatImpactResult({ ...createImpactResult(), seeds: [], count: 0, nodes: [], files: [], edges: [] }, "table");
+
+    expect(output).toContain("input\tleaf");
+    expect(output).toContain("seeds\ntype\tkind\tfilePath\tline\tqualifiedName\tsignature");
+    expect(output).toContain("affected\ntype\tkind\tfilePath\tline\tqualifiedName\tsignature");
+    expect(output).toContain("files\npath");
   });
 });
 

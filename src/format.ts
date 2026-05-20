@@ -34,9 +34,10 @@ export function formatImpactResult(result: LuaGraphImpactResult, format: GraphOu
 
 function formatQueryTable(result: LuaGraphQueryResult): string {
   return [
-    `expression: ${result.expression}`,
-    `count: ${result.count}`,
-    ...result.nodes.map(formatQueryNodeLine),
+    tableRow(["expression", result.expression]),
+    tableRow(["count", result.count]),
+    queryTableHeader(),
+    ...result.nodes.map(formatQueryNodeTableRow),
   ].join("\n");
 }
 
@@ -60,15 +61,18 @@ function formatQueryTree(result: LuaGraphQueryResult): string {
 
 function formatImpactTable(result: LuaGraphImpactResult): string {
   return [
-    `input: ${result.input}`,
-    `depth: ${result.depth}`,
-    `count: ${result.count}`,
-    "seeds:",
-    ...result.seeds.map((seed) => `  ${formatSymbolLine(seed)}`),
-    "affected:",
-    ...result.nodes.map((node) => `  ${formatSymbolLine(node)}`),
-    "files:",
-    ...result.files.map((file) => `  ${file}`),
+    tableRow(["input", result.input]),
+    tableRow(["depth", result.depth]),
+    tableRow(["count", result.count]),
+    "seeds",
+    symbolTableHeader(),
+    ...result.seeds.map(formatSymbolTableRow),
+    "affected",
+    symbolTableHeader(),
+    ...result.nodes.map(formatSymbolTableRow),
+    "files",
+    "path",
+    ...result.files,
   ].join("\n");
 }
 
@@ -205,8 +209,32 @@ function formatQueryNodeLine(node: QueryNode): string {
   return formatSymbolLine(node);
 }
 
+function formatQueryNodeTableRow(node: QueryNode): string {
+  if (node.type === "File") {
+    return tableRow([node.type, node.kind, node.path, "", "", ""]);
+  }
+
+  return tableRow([node.type, node.kind, node.filePath, node.startLine, node.qualifiedName, node.signature]);
+}
+
 function formatSymbolLine(node: QuerySymbolNode): string {
   return `${node.filePath}:${node.startLine} ${node.kind} ${node.qualifiedName} ${node.signature}`;
+}
+
+function formatSymbolTableRow(node: QuerySymbolNode): string {
+  return tableRow([node.type, node.kind, node.filePath, node.startLine, node.qualifiedName, node.signature]);
+}
+
+function queryTableHeader(): string {
+  return tableRow(["type", "kind", "path/filePath", "line", "qualifiedName", "signature"]);
+}
+
+function symbolTableHeader(): string {
+  return tableRow(["type", "kind", "filePath", "line", "qualifiedName", "signature"]);
+}
+
+function tableRow(values: readonly (number | string)[]): string {
+  return values.map(String).join("\t");
 }
 
 function compareSymbols(left: QuerySymbolNode, right: QuerySymbolNode): number {
