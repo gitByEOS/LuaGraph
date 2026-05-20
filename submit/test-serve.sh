@@ -65,6 +65,7 @@ await assertJson(`${baseUrl}/api/code?path=src/player.lua&line=2&context=1`, (bo
 await assertText(`${baseUrl}/`, "LuaGraph");
 await assertText(`${baseUrl}/app.js`, "/api/graph");
 await assertText(`${baseUrl}/style.css`, "body");
+await assertText(`${baseUrl}/vendor/echarts.min.js`, "echarts");
 
 async function waitForServer(url) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -74,7 +75,7 @@ async function waitForServer(url) {
         return;
       }
     } catch {
-      // Retry while the server starts.
+      // 服务启动期间可能短暂不可用，继续重试。
     }
 
     await new Promise((resolve) => setTimeout(resolve, 100));
