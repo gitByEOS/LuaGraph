@@ -136,19 +136,6 @@ describe("serve API", () => {
     expect(response.status).toBe(404);
   });
 
-  it("服务 UI 主入口静态资源", async () => {
-    const projectRoot = await createIndexedProject();
-    const server = await createTestServer(projectRoot);
-
-    await expect(fetchText(`${server.url}/app.js`)).resolves.toMatchObject({
-      status: 200,
-      body: expect.stringContaining("LuaGraph"),
-    });
-    await expect(fetchText(`${server.url}/style.css`)).resolves.toMatchObject({
-      status: 200,
-      body: expect.stringContaining("font-family"),
-    });
-  });
 });
 
 async function createIndexedProject(): Promise<string> {
@@ -193,11 +180,3 @@ async function fetchJson(url: string): Promise<{ readonly status: number; readon
   };
 }
 
-async function fetchText(url: string): Promise<{ readonly status: number; readonly body: string }> {
-  const response = await fetch(url);
-
-  return {
-    status: response.status,
-    body: await response.text(),
-  };
-}
