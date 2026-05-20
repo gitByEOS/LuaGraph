@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LuaGraph Serve</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">LuaGraph</p>
+        <h1>静态 Web 图谱</h1>
+      </div>
+      <section id="statusPanel" class="status-grid" aria-label="项目状态">
+        <article class="metric">
+          <span class="metric-label">文件</span>
+          <strong id="fileCount">--</strong>
+        </article>
+        <article class="metric">
+          <span class="metric-label">符号</span>
+          <strong id="symbolCount">--</strong>
+        </article>
+        <article class="metric">
+          <span class="metric-label">关系</span>
+          <strong id="edgeCount">--</strong>
+        </article>
+        <article class="metric">
+          <span class="metric-label">解析错误</span>
+          <strong id="parseErrorCount">--</strong>
+        </article>
+      </section>
+    </header>
+
+    <main class="layout">
+      <aside class="panel sidebar" aria-label="搜索和过滤">
+        <label class="field-label" for="searchInput">搜索</label>
+        <input id="searchInput" type="search" placeholder="name / qualifiedName / filePath / signature" autocomplete="off" />
+
+        <label class="field-label" for="kindFilter">Kind</label>
+        <select id="kindFilter">
+          <option value="">全部</option>
+        </select>
+
+        <div class="result-title">
+          <span>结果</span>
+          <strong id="resultCount">0</strong>
+        </div>
+        <ol id="resultList" class="result-list"></ol>
+      </aside>
+
+      <section class="panel graph-panel" aria-label="图谱">
+        <div id="message" class="message" hidden></div>
+        <div id="graph" class="graph"></div>
+      </section>
+
+      <aside class="panel detail-panel" aria-label="节点详情">
+        <section>
+          <p class="eyebrow">节点详情</p>
+          <div id="nodeDetail" class="detail-empty">点击图谱节点查看详情</div>
+        </section>
+        <section>
+          <p class="eyebrow">源码片段</p>
+          <pre id="codeSnippet" class="code-box">点击 Symbol 节点后加载源码</pre>
+        </section>
+      </aside>
+    </main>
+
+    <script src="/vendor/echarts.min.js"></script>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
