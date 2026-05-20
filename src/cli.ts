@@ -123,6 +123,9 @@ export function createCli(): Command {
       try {
         const result = await indexProject(projectRoot ?? process.cwd(), {
           force: options?.force === true,
+          ...(options?.quiet === true
+            ? {}
+            : { onProgress: (message: string) => console.error(`[index] ${message}`) }),
         });
 
         if (options?.quiet === true) {

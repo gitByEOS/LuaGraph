@@ -127,6 +127,7 @@ describe("luagraph index CLI", () => {
   it("index 命令完成写入并输出 JSON", async () => {
     const projectRoot = await createTempProject();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const cli = createTestCli();
 
     await writeLuaFile(
@@ -151,8 +152,18 @@ describe("luagraph index CLI", () => {
       containsCount: 2,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
+    expect(error.mock.calls.map((call) => String(call[0]))).toEqual(
+      expect.arrayContaining([
+        "[index] 开始扫描 Lua 文件",
+        "[index] 扫描到 1 个 Lua 文件",
+        "[index] 开始索引 Lua 符号",
+        "[index] 已索引 1/1 个 Lua 文件",
+        "[index] 完成统计：文件 1，符号 2，Contains 2",
+      ]),
+    );
 
     log.mockRestore();
+    error.mockRestore();
   });
 
   it("不再暴露 analyze 命令", async () => {

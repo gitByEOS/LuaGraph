@@ -9,6 +9,7 @@
 
   const CATEGORY_COLORS = {
     File: "#8aadf4",
+    class: "#eed49f",
     table: "#eed49f",
     module: "#c6a0f6",
     function: "#a6da95",

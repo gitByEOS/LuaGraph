@@ -25,8 +25,8 @@ describe("Lua parser Phase 1 最小提取", () => {
       symbols: [
         {
           type: "Symbol",
-          id: "src/game.lua#table#SlotMachine#1:1",
-          kind: "table",
+          id: "src/game.lua#class#SlotMachine#1:1",
+          kind: "class",
           name: "SlotMachine",
           qualifiedName: "SlotMachine",
           filePath: "src/game.lua",

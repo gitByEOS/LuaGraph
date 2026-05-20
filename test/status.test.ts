@@ -54,9 +54,9 @@ describe("getProjectStatus", () => {
       edgeCount: 3,
       parseErrorCount: 0,
       symbolKindCounts: {
+        class: 1,
         function: 1,
         method: 1,
-        table: 1,
       },
       pendingSyncChangeCount: 0,
     });

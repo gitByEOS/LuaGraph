@@ -62,7 +62,7 @@ function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefin
   }
 
   return {
-    kind: "table",
+    kind: "class",
     name,
     qualifiedName: name,
     startLine: lineNumber,

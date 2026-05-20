@@ -17,7 +17,7 @@ describe("sampleProject", () => {
     );
   });
 
-  it("抽查 index 后的 table/function/method/local function", async () => {
+  it("抽查 index 后的 class/function/method/local function", async () => {
     const projectRoot = await createIndexedProject();
 
     await expect(sampleProject(projectRoot)).resolves.toEqual({
@@ -25,7 +25,7 @@ describe("sampleProject", () => {
       count: 4,
       symbols: [
         {
-          kind: "table",
+          kind: "class",
           name: "Player",
           qualifiedName: "Player",
           filePath: "src/player.lua",

@@ -12,7 +12,12 @@ import type { IndexResult, LuaSymbol, NormalizedPath, ScannedLuaFile } from "./t
 
 export type IndexProjectOptions = {
   readonly force?: boolean;
+  readonly onProgress?: IndexProgressReporter;
 };
+
+export type IndexProgressReporter = (message: string) => void;
+
+const FILE_PROGRESS_INTERVAL = 25;
 
 export async function indexProject(
   projectRoot: string,
@@ -25,7 +30,9 @@ export async function indexProject(
     throw new Error(`未找到配置文件: ${resolvedProjectRoot}/.luagraph/config.json`);
   }
 
+  reportProgress(options, "开始扫描 Lua 文件");
   const files = await scanLuaFiles(resolvedProjectRoot, config);
+  reportProgress(options, `扫描到 ${files.length} 个 Lua 文件`);
   const databaseDir = nodePath.resolve(resolvedProjectRoot, config.databaseDir);
   const databasePath = getKuzuDatabasePath(databaseDir);
 
@@ -40,8 +47,9 @@ export async function indexProject(
 
   try {
     await initializeSchema(connection);
+    reportProgress(options, "开始索引 Lua 符号");
 
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
       const content = await readFile(nodePath.join(resolvedProjectRoot, file.path), "utf8");
       const parsed = parseLuaFile(file.path, content);
 
@@ -54,11 +62,17 @@ export async function indexProject(
 
       await insertContainsRelationships(connection, file.path, parsed.symbols);
       containsCount += parsed.symbols.length;
+      reportFileProgress(options, index + 1, files.length);
     }
   } finally {
     await connection.close();
     await database.close();
   }
+
+  reportProgress(
+    options,
+    `完成统计：文件 ${files.length}，符号 ${symbolCount}，Contains ${containsCount}`,
+  );
 
   return {
     fileCount: files.length,
@@ -66,6 +80,18 @@ export async function indexProject(
     containsCount,
     databaseDir,
   };
+}
+
+function reportFileProgress(options: IndexProjectOptions, done: number, total: number): void {
+  if (done !== total && done % FILE_PROGRESS_INTERVAL !== 0) {
+    return;
+  }
+
+  reportProgress(options, `已索引 ${done}/${total} 个 Lua 文件`);
+}
+
+function reportProgress(options: IndexProjectOptions, message: string): void {
+  options.onProgress?.(message);
 }
 
 async function initializeSchema(connection: Connection): Promise<void> {

@@ -52,7 +52,7 @@ describe("serve API", () => {
         }),
         expect.objectContaining({
           type: "Symbol",
-          kind: "table",
+          kind: "class",
           filePath: "src/player.lua",
           startLine: 1,
         }),

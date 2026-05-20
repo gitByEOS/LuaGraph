@@ -19,7 +19,7 @@ export type ScannedLuaFile = {
   readonly modifiedAt: Date;
 };
 
-export type SymbolKind = "table" | "module" | "method" | "function";
+export type SymbolKind = "class" | "table" | "module" | "method" | "function";
 
 export type LuaFile = {
   readonly type: "File";
