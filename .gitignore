@@ -1,0 +1,6 @@
+node_modules/
+dist/
+coverage/
+.luagraph/
+.DS_Store
+*.log

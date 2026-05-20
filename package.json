@@ -1,0 +1,26 @@
+{
+  "name": "luagraph",
+  "version": "0.1.0",
+  "description": "LuaGraph TypeScript CLI skeleton.",
+  "bin": {
+    "luagraph": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "commander": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest",
+    "vite-plus": "latest",
+    "vitest": "latest"
+  },
+  "packageManager": "pnpm@11.1.3"
+}
