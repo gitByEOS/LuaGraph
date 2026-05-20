@@ -4,11 +4,7 @@
 
 LuaGraph v0.1.0 是一个 TypeScript CLI/library 骨架，工具链使用 Vite+ `vp`。
 
-<<<<<<< HEAD
 当前阶段只建立可扩展模块边界，不实现真实 `init` 业务写入：
-=======
-当前阶段建立可扩展模块边界，`init` 真实业务写入仍由后续模块接入：
->>>>>>> 942b815 (修正配置验收说明)
 
 - `src/cli.ts`：CLI 入口，预留 `luagraph init <project_root>` 命令。
 - `src/lib.ts`：公共库出口。
@@ -21,15 +17,12 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library 骨架，工具链使用 Vite+ 
 
 ## 验收标准
 
-基础初始化验收：
+在项目根目录运行：
 
 ```bash
 submit/test-agent-init.sh
-<<<<<<< HEAD
 submit/test-agent-path.sh
 submit/test-agent-config.sh
-=======
->>>>>>> 942b815 (修正配置验收说明)
 ```
 
 `submit/test-agent-init.sh` 会从自身位置定位项目根，并依次执行：
@@ -40,7 +33,6 @@ vp test
 vp check
 ```
 
-<<<<<<< HEAD
 `submit/test-agent-path.sh` 会从自身位置定位项目根，并依次执行：
 
 ```bash
@@ -48,8 +40,6 @@ vp test test/path.test.ts
 vp check
 ```
 
-=======
->>>>>>> 942b815 (修正配置验收说明)
 配置模块验收：
 
 ```bash
