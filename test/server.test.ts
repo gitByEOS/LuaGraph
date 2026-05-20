@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { indexProject } from "../src/indexer.js";
 import { initializeProject } from "../src/init.js";
@@ -134,6 +134,47 @@ describe("serve API", () => {
     const response = await fetchJson(`${server.url}/missing.js`);
 
     expect(response.status).toBe(404);
+  });
+
+  it("静态资源文件缺失时返回 404 且服务继续可用", async () => {
+    const projectRoot = await createIndexedProject();
+
+    vi.resetModules();
+    vi.doMock("node:fs/promises", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs/promises")>();
+
+      return {
+        ...actual,
+        readFile: async (...args: Parameters<typeof actual.readFile>) => {
+          if (String(args[0]).endsWith("node_modules/echarts/dist/echarts.min.js")) {
+            const error = new Error("missing vendor asset") as NodeJS.ErrnoException;
+            error.code = "ENOENT";
+            throw error;
+          }
+
+          return actual.readFile(...args);
+        },
+      };
+    });
+
+    try {
+      const { startServer: startServerWithMissingVendor } = await import("../src/server.js");
+      const server = await startServerWithMissingVendor(projectRoot);
+      servers.push(server);
+
+      const missingAsset = await fetchJson(`${server.url}/vendor/echarts.min.js`);
+      expect(missingAsset).toEqual({
+        status: 404,
+        body: { error: "资源不存在" },
+      });
+
+      const status = await fetchJson(`${server.url}/api/status`);
+      expect(status.status).toBe(200);
+      expect(status.body.fileCount).toBe(1);
+    } finally {
+      vi.doUnmock("node:fs/promises");
+      vi.resetModules();
+    }
   });
 
 });

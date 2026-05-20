@@ -227,8 +227,10 @@ async function writeStaticAsset(response: ServerResponse, path: string): Promise
   }
 
   try {
+    const content = await readFile(asset.path);
+
     response.writeHead(200, { "Content-Type": asset.contentType });
-    response.end(await readFile(asset.path));
+    response.end(content);
   } catch (error) {
     if (isMissingPathError(error)) {
       throw new HttpError(404, "资源不存在");
