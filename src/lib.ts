@@ -1,4 +1,9 @@
 export {
+  type CodeSnippetRequest,
+  type CodeSnippetResult,
+  readCodeSnippet,
+} from "./code.js";
+export {
   configPath,
   defaultConfig,
   createDefaultConfig,
@@ -13,6 +18,7 @@ export { extractLuaSymbols, parseLuaFile } from "./parser.js";
 export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./path.js";
 export { sampleProject, type SampleProjectOptions } from "./sample.js";
 export { scanLuaFiles } from "./scanner.js";
+export { startServer, type ServerHandle, type ServerOptions } from "./server.js";
 export { getProjectStatus } from "./status.js";
 export { getKuzuDatabasePath, initializeStore, schemaStatements } from "./store.js";
 export type {
