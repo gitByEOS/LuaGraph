@@ -91,3 +91,12 @@ export type IndexResult = {
   readonly containsCount: number;
   readonly databaseDir: string;
 };
+
+export type SyncResult = {
+  readonly scannedFileCount: number;
+  readonly changedFileCount: number;
+  readonly removedFileCount: number;
+  readonly symbolCount: number;
+  readonly containsCount: number;
+  readonly databaseDir: string;
+};

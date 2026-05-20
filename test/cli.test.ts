@@ -178,6 +178,43 @@ describe("luagraph index CLI", () => {
   });
 });
 
+describe("luagraph sync CLI", () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
+  it("sync 命令输出可解析 JSON", async () => {
+    const projectRoot = await createTempProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const cli = createTestCli();
+
+    await writeLuaFile(projectRoot, "src/player.lua", "function before()\nend\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+    await writeLuaFile(projectRoot, "src/player.lua", "function after()\nend\n");
+
+    await cli.parseAsync(["node", "luagraph", "sync", projectRoot, "--format", "json"], {
+      from: "node",
+    });
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const output = log.mock.calls[0]?.[0];
+    expect(typeof output).toBe("string");
+    expect(JSON.parse(output as string)).toMatchObject({
+      scannedFileCount: 1,
+      changedFileCount: 1,
+      removedFileCount: 0,
+      symbolCount: 1,
+      containsCount: 1,
+      databaseDir: join(projectRoot, ".luagraph/kuzu"),
+    });
+
+    log.mockRestore();
+  });
+});
+
 describe("luagraph sample CLI", () => {
   afterEach(async () => {
     await Promise.all(

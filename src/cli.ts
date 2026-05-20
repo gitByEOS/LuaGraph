@@ -10,7 +10,8 @@ import { initializeProject } from "./init.js";
 import { sampleProject } from "./sample.js";
 import { startServer } from "./server.js";
 import { getProjectStatus } from "./status.js";
-import type { SampleResult } from "./types.js";
+import { syncProject } from "./syncer.js";
+import type { SampleResult, SyncResult } from "./types.js";
 
 export function createCli(): Command {
   const program = new Command();
@@ -138,6 +139,33 @@ export function createCli(): Command {
       }
     });
 
+  program
+    .command("sync")
+    .argument("[project_root]", "项目根目录，默认当前目录")
+    .option("--quiet", "静默执行，不输出结果")
+    .option("--format <format>", "输出格式：json|table", "json")
+    .description("基于 contentHash 增量刷新 LuaGraph 索引")
+    .action(async (projectRoot?: string, options?: SyncCommandOptions) => {
+      const outputFormat = parseSyncOutputFormat(options?.format ?? "json");
+
+      if (outputFormat === undefined) {
+        program.error("sync --format 仅支持 json 或 table");
+        return;
+      }
+
+      try {
+        const result = await syncProject(projectRoot ?? process.cwd());
+
+        if (options?.quiet === true) {
+          return;
+        }
+
+        console.log(formatSyncResult(result, outputFormat));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
   return program;
 }
 
@@ -157,6 +185,11 @@ type IndexCommandOptions = {
   readonly format?: string;
 };
 
+type SyncCommandOptions = {
+  readonly quiet?: boolean;
+  readonly format?: string;
+};
+
 type SampleCommandOptions = {
   readonly limit?: string;
   readonly format?: string;
@@ -169,8 +202,13 @@ type ServeCommandOptions = {
 
 type IndexOutputFormat = "json" | "table";
 type SampleOutputFormat = "json" | "table";
+type SyncOutputFormat = "json" | "table";
 
 function parseIndexOutputFormat(value: string): IndexOutputFormat | undefined {
+  return value === "json" || value === "table" ? value : undefined;
+}
+
+function parseSyncOutputFormat(value: string): SyncOutputFormat | undefined {
   return value === "json" || value === "table" ? value : undefined;
 }
 
@@ -210,5 +248,20 @@ function formatSampleResult(result: SampleResult, format: SampleOutputFormat): s
       (symbol) =>
         `${symbol.filePath}:${symbol.startLine} ${symbol.kind} ${symbol.qualifiedName} local=${symbol.isLocal} ${symbol.signature}`,
     ),
+  ].join("\n");
+}
+
+function formatSyncResult(result: SyncResult, format: SyncOutputFormat): string {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+
+  return [
+    `scannedFileCount: ${result.scannedFileCount}`,
+    `changedFileCount: ${result.changedFileCount}`,
+    `removedFileCount: ${result.removedFileCount}`,
+    `symbolCount: ${result.symbolCount}`,
+    `containsCount: ${result.containsCount}`,
+    `databaseDir: ${result.databaseDir}`,
   ].join("\n");
 }
