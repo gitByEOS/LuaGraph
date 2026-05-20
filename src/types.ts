@@ -66,7 +66,7 @@ export type StatusResult = {
   readonly schemaCount: number;
 };
 
-export type AnalyzeResult = {
+export type IndexResult = {
   readonly fileCount: number;
   readonly symbolCount: number;
   readonly containsCount: number;

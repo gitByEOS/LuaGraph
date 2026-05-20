@@ -1,50 +1,38 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { readConfig, validateConfig } from "./config.js";
-import { normalizeRepositoryPath } from "./path.js";
+import { readConfig } from "./config.js";
 import { parseLuaFile } from "./parser.js";
-import { createPatternMatcher } from "./scanner.js";
-import { getKuzuDatabasePath } from "./store.js";
-import type {
-  AnalyzeResult,
-  LuaGraphConfig,
-  LuaSymbol,
-  NormalizedPath,
-  ScannedLuaFile,
-} from "./types.js";
+import { scanLuaFiles } from "./scanner.js";
+import { getKuzuDatabasePath, schemaStatements } from "./store.js";
+import type { IndexResult, LuaSymbol, NormalizedPath, ScannedLuaFile } from "./types.js";
 
-export async function analyzeProject(
+export type IndexProjectOptions = {
+  readonly force?: boolean;
+};
+
+export async function indexProject(
   projectRoot: string,
-  includePattern: string,
-): Promise<AnalyzeResult> {
-  const config = await readConfig(projectRoot);
+  options: IndexProjectOptions = {},
+): Promise<IndexResult> {
+  const resolvedProjectRoot = nodePath.resolve(projectRoot);
+  const config = await readConfig(resolvedProjectRoot);
 
   if (config === undefined) {
-    throw new Error(`未找到配置文件: ${projectRoot}/.luagraph/config.json`);
+    throw new Error(`未找到配置文件: ${resolvedProjectRoot}/.luagraph/config.json`);
   }
 
-  validateConfig(config);
-
-  const mergedConfig: LuaGraphConfig = {
-    ...config,
-    include: [includePattern],
-  };
-
-  const files = await scanLuaFiles(projectRoot, mergedConfig);
-
-  const resolvedProjectRoot = nodePath.resolve(projectRoot);
+  const files = await scanLuaFiles(resolvedProjectRoot, config);
   const databaseDir = nodePath.resolve(resolvedProjectRoot, config.databaseDir);
+  const databasePath = getKuzuDatabasePath(databaseDir);
 
-  const dbPath = getKuzuDatabasePath(databaseDir);
+  await rm(options.force === true ? databaseDir : databasePath, { recursive: true, force: true });
+  await mkdir(databaseDir, { recursive: true });
 
-  await rm(dbPath, { recursive: true, force: true });
-  await mkdir(nodePath.dirname(dbPath), { recursive: true });
-
-  const database = new Database(dbPath);
+  const database = new Database(databasePath);
   const connection = new Connection(database);
 
   let symbolCount = 0;
@@ -54,8 +42,7 @@ export async function analyzeProject(
     await initializeSchema(connection);
 
     for (const file of files) {
-      const content = await readFile(nodePath.join(projectRoot, file.path), "utf8");
-
+      const content = await readFile(nodePath.join(resolvedProjectRoot, file.path), "utf8");
       const parsed = parseLuaFile(file.path, content);
 
       await insertFile(connection, file, content);
@@ -81,61 +68,9 @@ export async function analyzeProject(
   };
 }
 
-async function scanLuaFiles(
-  projectRoot: string,
-  config: LuaGraphConfig,
-): Promise<ScannedLuaFile[]> {
-  const includeMatcher = createPatternMatcher(config.include);
-  const excludeMatcher = createPatternMatcher(config.exclude);
-  const files: ScannedLuaFile[] = [];
-
-  await scanDirectory("");
-
-  return files.sort((left, right) => left.path.localeCompare(right.path));
-
-  async function scanDirectory(relativeDirectory: string): Promise<void> {
-    const absoluteDirectory =
-      relativeDirectory === "" ? projectRoot : nodePath.join(projectRoot, relativeDirectory);
-    const entries = await readdir(absoluteDirectory, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const relativePath = toRepositoryPath(relativeDirectory, entry.name);
-
-      if (entry.isDirectory()) {
-        if (!excludeMatcher(relativePath)) {
-          await scanDirectory(relativePath);
-        }
-        continue;
-      }
-
-      if (!entry.isFile() || !relativePath.endsWith(".lua") || excludeMatcher(relativePath)) {
-        continue;
-      }
-
-      if (!includeMatcher(relativePath)) {
-        continue;
-      }
-
-      const fileStats = await stat(nodePath.join(projectRoot, relativePath));
-
-      files.push({
-        path: relativePath,
-        size: fileStats.size,
-        modifiedAt: fileStats.mtime,
-      });
-    }
-  }
-}
-
 async function initializeSchema(connection: Connection): Promise<void> {
-  const cyphers = [
-    "CREATE NODE TABLE IF NOT EXISTS File(path STRING PRIMARY KEY, contentHash STRING, size UINT64, modifiedAt TIMESTAMP, indexedAt TIMESTAMP, nodeCount UINT64, error STRING);",
-    "CREATE NODE TABLE IF NOT EXISTS Symbol(id STRING PRIMARY KEY, kind STRING, name STRING, qualifiedName STRING, filePath STRING, startLine UINT64, endLine UINT64, startColumn UINT64, endColumn UINT64, docstring STRING, signature STRING, isLocal BOOLEAN, isExported BOOLEAN, isUnresolved BOOLEAN, updatedAt TIMESTAMP);",
-    "CREATE REL TABLE IF NOT EXISTS Contains(FROM File TO Symbol, FROM Symbol TO Symbol);",
-  ];
-
-  for (const cypher of cyphers) {
-    closeResult(await connection.query(cypher));
+  for (const statement of schemaStatements) {
+    closeResult(await connection.query(statement.cypher));
   }
 }
 
@@ -198,6 +133,7 @@ async function insertContainsRelationships(
   const stmt = await connection.prepare(
     "MATCH (f:File {path: $fromPath}), (s:Symbol {id: $toId}) CREATE (f)-[r:Contains]->(s)",
   );
+
   for (const symbol of symbols) {
     closeResult(
       await connection.execute(stmt, {
@@ -208,14 +144,9 @@ async function insertContainsRelationships(
   }
 }
 
-function toRepositoryPath(relativeDirectory: string, entryName: string): NormalizedPath {
-  const relativePath = relativeDirectory === "" ? entryName : `${relativeDirectory}/${entryName}`;
-
-  return normalizeRepositoryPath(relativePath);
-}
-
 function closeResult(result: QueryResult | QueryResult[]): void {
   const results = Array.isArray(result) ? result : [result];
+
   for (const item of results) {
     item.close();
   }

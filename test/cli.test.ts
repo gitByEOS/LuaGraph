@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -86,6 +86,56 @@ describe("luagraph status CLI", () => {
   });
 });
 
+describe("luagraph index CLI", () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
+  it("index 命令完成写入并输出 JSON", async () => {
+    const projectRoot = await createTempProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const cli = createTestCli();
+
+    await writeLuaFile(
+      projectRoot,
+      "src/player.lua",
+      'Player = class("Player")\nfunction Player:move()\nend\n',
+    );
+
+    await cli.parseAsync(["node", "luagraph", "init", projectRoot], { from: "node" });
+    log.mockClear();
+
+    await cli.parseAsync(["node", "luagraph", "index", projectRoot, "--format", "json"], {
+      from: "node",
+    });
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const output = log.mock.calls[0]?.[0];
+    expect(typeof output).toBe("string");
+    expect(JSON.parse(output as string)).toMatchObject({
+      fileCount: 1,
+      symbolCount: 2,
+      containsCount: 2,
+      databaseDir: join(projectRoot, ".luagraph/kuzu"),
+    });
+
+    log.mockRestore();
+  });
+
+  it("不再暴露 analyze 命令", async () => {
+    const cli = createTestCli();
+    const helpText = cli.helpInformation();
+
+    expect(helpText).toContain("index");
+    expect(helpText).not.toContain("analyze");
+    await expect(cli.parseAsync(["node", "luagraph", "analyze"], { from: "node" })).rejects.toThrow(
+      "unknown command 'analyze'",
+    );
+  });
+});
+
 function createTestCli() {
   return createCli().exitOverride();
 }
@@ -94,4 +144,11 @@ async function createTempProject(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "luagraph-cli-"));
   tempRoots.push(projectRoot);
   return projectRoot;
+}
+
+async function writeLuaFile(projectRoot: string, relativePath: string, content: string): Promise<void> {
+  const targetPath = join(projectRoot, relativePath);
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, content, "utf8");
 }

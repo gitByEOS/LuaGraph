@@ -39,8 +39,14 @@ describe("Kuzu store", () => {
 
     try {
       const result = await connection.query("MATCH (file:File) RETURN count(file) AS fileCount;");
-      expect(await result.getAll()).toEqual([{ fileCount: 0 }]);
-      result.close();
+      const queryResult = Array.isArray(result) ? result[0] : result;
+
+      if (queryResult === undefined) {
+        throw new Error("Kuzu 查询未返回结果");
+      }
+
+      expect(await queryResult.getAll()).toEqual([{ fileCount: 0 }]);
+      queryResult.close();
     } finally {
       await connection.close();
       await database.close();

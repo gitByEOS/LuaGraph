@@ -1,25 +1,58 @@
 import { describe, expect, it } from "vitest";
 
-import { analyzeProject } from "../src/analyze.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+import { afterEach } from "vitest";
+
+import { indexProject } from "../src/indexer.js";
 import { getProjectStatus } from "../src/status.js";
 import { initializeProject } from "../src/init.js";
 
-describe("Systems/ analysis verification", () => {
-  it("分析 Systems/ 后 Kuzu 库中有数据", async () => {
-    const projectRoot = "/Users/bole/dev/mul-agents/LuaGraph";
+const tempRoots: string[] = [];
+
+describe("index verification", () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
+  it("index 后 status 输出非零计数", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "Systems/Player.lua",
+      'Player = class("Player")\nfunction Player:attack()\nend\n',
+    );
 
     await initializeProject(projectRoot);
 
-    const analyzeResult = await analyzeProject(projectRoot, "Systems/**/*.lua");
+    const indexResult = await indexProject(projectRoot);
 
-    expect(analyzeResult.fileCount).toBe(18);
-    expect(analyzeResult.symbolCount).toBeGreaterThan(0);
-    expect(analyzeResult.containsCount).toBeGreaterThan(0);
+    expect(indexResult.fileCount).toBe(1);
+    expect(indexResult.symbolCount).toBeGreaterThan(0);
+    expect(indexResult.containsCount).toBeGreaterThan(0);
 
     const statusResult = await getProjectStatus(projectRoot);
 
-    expect(statusResult.fileCount).toBe(18);
-    expect(statusResult.symbolCount).toBe(analyzeResult.symbolCount);
+    expect(statusResult.fileCount).toBe(1);
+    expect(statusResult.symbolCount).toBe(indexResult.symbolCount);
     expect(statusResult.edgeCount).toBeGreaterThan(0);
-  }, 60000);
+  });
 });
+
+async function createTempProject(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "luagraph-verify-"));
+  tempRoots.push(projectRoot);
+  return projectRoot;
+}
+
+async function writeLuaFile(projectRoot: string, relativePath: string, content: string): Promise<void> {
+  const targetPath = join(projectRoot, relativePath);
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, content, "utf8");
+}

@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { Command } from "commander";
 
-import { analyzeProject } from "./analyze.js";
+import { indexProject } from "./indexer.js";
 import { initializeProject } from "./init.js";
 import { getProjectStatus } from "./status.js";
 
@@ -55,14 +55,30 @@ export function createCli(): Command {
     });
 
   program
-    .command("analyze")
-    .argument("<project_root>", "项目根目录")
-    .option("--include <pattern>", "文件匹配模式", "Systems/**/*.lua")
-    .description("分析 Lua 符号并写入 Kuzu 图数据库")
-    .action(async (projectRoot: string, options?: { readonly include?: string }) => {
+    .command("index")
+    .argument("[project_root]", "项目根目录，默认当前目录")
+    .option("--force", "强制重建索引")
+    .option("--quiet", "静默执行，不输出结果")
+    .option("--format <format>", "输出格式：json|table", "json")
+    .description("索引 Lua 符号并写入 Kuzu 图数据库")
+    .action(async (projectRoot?: string, options?: IndexCommandOptions) => {
+      const outputFormat = parseIndexOutputFormat(options?.format ?? "json");
+
+      if (outputFormat === undefined) {
+        program.error("index --format 仅支持 json 或 table");
+        return;
+      }
+
       try {
-        const result = await analyzeProject(projectRoot, options?.include ?? "Systems/**/*.lua");
-        console.log(JSON.stringify(result, null, 2));
+        const result = await indexProject(projectRoot ?? process.cwd(), {
+          force: options?.force === true,
+        });
+
+        if (options?.quiet === true) {
+          return;
+        }
+
+        console.log(formatIndexResult(result, outputFormat));
       } catch (error) {
         program.error(error instanceof Error ? error.message : String(error));
       }
@@ -79,4 +95,24 @@ function isCliEntrypoint(): boolean {
   const entrypoint = process.argv[1];
 
   return entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href;
+}
+
+type IndexCommandOptions = {
+  readonly force?: boolean;
+  readonly quiet?: boolean;
+  readonly format?: string;
+};
+
+type IndexOutputFormat = "json" | "table";
+
+function parseIndexOutputFormat(value: string): IndexOutputFormat | undefined {
+  return value === "json" || value === "table" ? value : undefined;
+}
+
+function formatIndexResult(result: unknown, format: IndexOutputFormat): string {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+
+  return JSON.stringify(result, null, 2);
 }

@@ -6,5 +6,5 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-vp test test/analyze.test.ts
+vp test test/indexer.test.ts
 vp check
