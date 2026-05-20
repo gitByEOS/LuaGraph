@@ -19,6 +19,31 @@ export type SchemaStatement = {
   readonly cypher: string;
 };
 
+export type SymbolKind = "table" | "module" | "method" | "function";
+
+export type LuaFile = {
+  readonly type: "File";
+  readonly path: NormalizedPath;
+  readonly symbols: readonly LuaSymbol[];
+};
+
+export type LuaSymbol = {
+  readonly type: "Symbol";
+  readonly id: string;
+  readonly kind: SymbolKind;
+  readonly name: string;
+  readonly qualifiedName: string;
+  readonly filePath: NormalizedPath;
+  readonly startLine: number;
+  readonly startColumn: number;
+  readonly endLine: number;
+  readonly endColumn: number;
+  readonly signature: string;
+  readonly isLocal: boolean;
+  readonly isExported: boolean;
+  readonly isUnresolved: boolean;
+};
+
 export type InitPlan = {
   readonly projectRoot: string;
   readonly config: LuaGraphConfig;

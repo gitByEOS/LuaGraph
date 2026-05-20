@@ -12,6 +12,7 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library 骨架，工具链使用 Vite+ 
 - `src/config.ts`：配置读写校验，默认读取 `.gitignore` 生成 exclude。
 - `src/path.ts`：Git 风格路径规范化和安全解析。
 - `src/store.ts`：Kuzu schema 入口占位。
+- `src/parser.ts`：Phase 1 Lua 符号最小提取，输出 File 与 Symbol 结构。
 - `src/init.ts`：初始化流程编排入口占位。
 - `test/`：最小测试，证明 `vp test` 可运行。
 
@@ -64,6 +65,21 @@ submit/test-agent-store.sh
 ```bash
 vp install
 vp test test/store.test.ts
+vp check
+```
+
+Parser 模块验收：
+
+```bash
+submit/test-agent-parser.sh
+```
+
+`src/parser.ts` 当前是 Phase 1 最小提取：使用行级模式识别 `ClassName = class("ClassName"...)`、`function A:B()`、`function foo()` 和 `local function foo()`，生成稳定 id：`<path>#<kind>#<qualifiedName>#<startLine>:<startColumn>`。它不读取业务 `Systems` 代码，不写数据库，也不伪装完整 AST；后续接入 `tree-sitter`/`tree-sitter-lua` 时再扩展完整语法树提取。
+
+`submit/test-agent-parser.sh` 会从自身位置定位项目根，并依次执行：
+
+```bash
+vp test test/parser.test.ts
 vp check
 ```
 
