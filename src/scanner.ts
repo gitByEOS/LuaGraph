@@ -52,7 +52,7 @@ export async function scanLuaFiles(
 
 type PatternMatcher = (path: NormalizedPath) => boolean;
 
-function createPatternMatcher(patterns: readonly string[]): PatternMatcher {
+export function createPatternMatcher(patterns: readonly string[]): PatternMatcher {
   const matchers = patterns.map(createSinglePatternMatcher);
 
   return (path) => matchers.some((matcher) => matcher(path));

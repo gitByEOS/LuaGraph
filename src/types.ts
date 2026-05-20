@@ -65,3 +65,10 @@ export type StatusResult = {
   readonly configPath: string;
   readonly schemaCount: number;
 };
+
+export type AnalyzeResult = {
+  readonly fileCount: number;
+  readonly symbolCount: number;
+  readonly containsCount: number;
+  readonly databaseDir: string;
+};

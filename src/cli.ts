@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { Command } from "commander";
 
+import { analyzeProject } from "./analyze.js";
 import { initializeProject } from "./init.js";
 import { getProjectStatus } from "./status.js";
 
@@ -47,6 +48,20 @@ export function createCli(): Command {
 
       try {
         const result = await getProjectStatus(targetProjectRoot);
+        console.log(JSON.stringify(result, null, 2));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+  program
+    .command("analyze")
+    .argument("<project_root>", "项目根目录")
+    .option("--include <pattern>", "文件匹配模式", "Systems/**/*.lua")
+    .description("分析 Lua 符号并写入 Kuzu 图数据库")
+    .action(async (projectRoot: string, options?: { readonly include?: string }) => {
+      try {
+        const result = await analyzeProject(projectRoot, options?.include ?? "Systems/**/*.lua");
         console.log(JSON.stringify(result, null, 2));
       } catch (error) {
         program.error(error instanceof Error ? error.message : String(error));
