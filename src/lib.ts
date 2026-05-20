@@ -1,4 +1,12 @@
-export { defaultConfig, createDefaultConfig } from "./config.js";
+export {
+  configPath,
+  defaultConfig,
+  createDefaultConfig,
+  createProjectConfig,
+  readConfig,
+  validateConfig,
+  writeConfig,
+} from "./config.js";
 export { createInitPlan } from "./init.js";
 export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./path.js";
 export { schemaStatements } from "./store.js";
