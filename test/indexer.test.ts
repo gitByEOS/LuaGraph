@@ -2,10 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Connection, Database, type QueryResult } from "kuzu";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { indexProject } from "../src/indexer.js";
 import { initializeProject } from "../src/init.js";
+import { getKuzuDatabasePath } from "../src/store.js";
 
 const tempRoots: string[] = [];
 
@@ -32,8 +34,43 @@ describe("indexProject", () => {
       fileCount: 1,
       symbolCount: 2,
       containsCount: 2,
+      callsCount: 0,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
+  });
+
+  it("写入可解析的 Calls 关系", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(
+      projectRoot,
+      "src/calls.lua",
+      [
+        "function foo()",
+        "end",
+        "M = {}",
+        "function M.foo()",
+        "end",
+        "function obj:foo()",
+        "end",
+        "function init()",
+        "  foo()",
+        "  M.foo()",
+        "  obj:foo()",
+        "  missing()",
+        "end",
+      ].join("\n"),
+    );
+
+    await initializeProject(projectRoot);
+
+    const result = await indexProject(projectRoot);
+
+    expect(result.callsCount).toBe(3);
+    await expect(readCalls(projectRoot)).resolves.toEqual([
+      { source: "init", target: "M.foo", line: 10, column: 3, isResolved: true },
+      { source: "init", target: "foo", line: 9, column: 3, isResolved: true },
+      { source: "init", target: "obj:foo", line: 11, column: 3, isResolved: true },
+    ]);
   });
 
   it("对空项目返回零计数", async () => {
@@ -45,6 +82,7 @@ describe("indexProject", () => {
       fileCount: 0,
       symbolCount: 0,
       containsCount: 0,
+      callsCount: 0,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
   });
@@ -61,4 +99,46 @@ async function writeLuaFile(projectRoot: string, relativePath: string, content: 
 
   await mkdir(join(targetPath, ".."), { recursive: true });
   await writeFile(targetPath, content, "utf8");
+}
+
+async function readCalls(projectRoot: string): Promise<Record<string, unknown>[]> {
+  const database = new Database(
+    getKuzuDatabasePath(join(projectRoot, ".luagraph/kuzu")),
+    undefined,
+    undefined,
+    true,
+  );
+  const connection = new Connection(database);
+  let result: QueryResult | QueryResult[] | undefined;
+
+  try {
+    result = await connection.query(
+      `MATCH (source:Symbol)-[call:Calls]->(target:Symbol)
+RETURN source.qualifiedName AS source, target.qualifiedName AS target, call.line AS line,
+  call.\`column\` AS callColumn, call.isResolved AS isResolved
+ORDER BY target.qualifiedName;`,
+    );
+    const queryResult = Array.isArray(result) ? result[0] : result;
+    const rows = (await queryResult?.getAll()) ?? [];
+
+    return rows.map((row) => ({
+      source: String(row.source),
+      target: String(row.target),
+      line: Number(row.line),
+      column: Number(row.callColumn),
+      isResolved: row.isResolved,
+    }));
+  } finally {
+    closeQueryResult(result);
+    await connection.close();
+    await database.close();
+  }
+}
+
+function closeQueryResult(result: QueryResult | QueryResult[] | undefined): void {
+  const results = Array.isArray(result) ? result : result === undefined ? [] : [result];
+
+  for (const item of results) {
+    item.close();
+  }
 }

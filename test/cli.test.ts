@@ -158,7 +158,7 @@ describe("luagraph index CLI", () => {
         "[index] 扫描到 1 个 Lua 文件",
         "[index] 开始索引 Lua 符号",
         "[index] 索引文件[1/1] player.lua ...",
-        "[index] 完成统计：文件 1，符号 2，Contains 2",
+        "[index] 完成统计：文件 1，符号 2，Contains 2，Calls 0",
       ]),
     );
 
@@ -212,6 +212,51 @@ describe("luagraph sync CLI", () => {
     });
 
     log.mockRestore();
+  });
+});
+
+describe("luagraph query CLI", () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
+  it("输出机器可解析 JSON", async () => {
+    const projectRoot = await createTempProject();
+    const previousCwd = process.cwd();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const cli = createTestCli();
+
+    try {
+      await writeLuaFile(projectRoot, "src/main.lua", "function init()\nend\n");
+      await initializeProject(projectRoot);
+      await indexProject(projectRoot);
+      process.chdir(projectRoot);
+
+      await cli.parseAsync(["node", "luagraph", "query", "name:init", "--format", "json"], {
+        from: "node",
+      });
+
+      expect(log).toHaveBeenCalledTimes(1);
+      const output = log.mock.calls[0]?.[0];
+      expect(typeof output).toBe("string");
+      expect(JSON.parse(output as string)).toMatchObject({
+        expression: "name:init",
+        count: 1,
+        nodes: [
+          {
+            type: "Symbol",
+            kind: "function",
+            name: "init",
+            qualifiedName: "init",
+          },
+        ],
+      });
+    } finally {
+      process.chdir(previousCwd);
+      log.mockRestore();
+    }
   });
 });
 

@@ -88,6 +88,15 @@ describe("Lua parser Phase 1 最小提取", () => {
           isUnresolved: false,
         },
       ],
+      calls: [
+        {
+          type: "Call",
+          filePath: "src/game.lua",
+          calleeQualifiedName: "class",
+          line: 1,
+          column: 15,
+        },
+      ],
     });
   });
 
@@ -112,6 +121,32 @@ describe("Lua parser Phase 1 最小提取", () => {
     expect(file.symbols.map((symbol) => [symbol.kind, symbol.qualifiedName])).toEqual([
       ["class", "Player"],
       ["table", "DinerConfig"],
+    ]);
+  });
+
+  it("提取函数体中的静态调用表达式", () => {
+    const source = [
+      "function init()",
+      "  foo()",
+      "  M.foo()",
+      "  obj:foo()",
+      '  print("skip()") -- commentCall()',
+      "end",
+    ].join("\n");
+
+    const file = parseLuaFile("src/calls.lua", source);
+
+    expect(
+      file.calls.map((call) => ({
+        calleeQualifiedName: call.calleeQualifiedName,
+        line: call.line,
+        column: call.column,
+      })),
+    ).toEqual([
+      { calleeQualifiedName: "foo", line: 2, column: 3 },
+      { calleeQualifiedName: "M.foo", line: 3, column: 3 },
+      { calleeQualifiedName: "obj:foo", line: 4, column: 3 },
+      { calleeQualifiedName: "print", line: 5, column: 3 },
     ]);
   });
 

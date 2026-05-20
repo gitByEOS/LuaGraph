@@ -7,11 +7,12 @@ import { Command } from "commander";
 import { openUrl } from "./browser.js";
 import { indexProject } from "./indexer.js";
 import { initializeProject } from "./init.js";
+import { queryProject } from "./query.js";
 import { sampleProject } from "./sample.js";
 import { startServer } from "./server.js";
 import { getProjectStatus } from "./status.js";
 import { syncProject } from "./syncer.js";
-import type { SampleResult, SyncResult } from "./types.js";
+import type { LuaGraphQueryResult, QueryNode, SampleResult, SyncResult } from "./types.js";
 
 export function createCli(): Command {
   const program = new Command();
@@ -75,6 +76,37 @@ export function createCli(): Command {
       try {
         const result = await sampleProject(projectRoot ?? process.cwd(), { limit });
         console.log(formatSampleResult(result, outputFormat));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+  program
+    .command("query")
+    .argument("<expression...>", "查询表达式，如 name:init 或 kind:function name:init")
+    .option("--format <format>", "输出格式：json|table|tree", "json")
+    .option("--depth <n>", "调用关系查询深度", "1")
+    .option("--project-root <path>", "项目根目录，默认当前目录")
+    .description("查询已索引的 LuaGraph 图")
+    .action(async (expressionParts: string[], options?: QueryCommandOptions) => {
+      const outputFormat = parseQueryOutputFormat(options?.format ?? "json");
+      const depth = parseQueryDepth(options?.depth ?? "1");
+
+      if (outputFormat === undefined) {
+        program.error("query --format 仅支持 json、table 或 tree");
+        return;
+      }
+
+      if (depth === undefined) {
+        program.error("query --depth 必须是正整数");
+        return;
+      }
+
+      try {
+        const result = await queryProject(options?.projectRoot ?? process.cwd(), expressionParts.join(" "), {
+          depth,
+        });
+        console.log(formatQueryResult(result, outputFormat));
       } catch (error) {
         program.error(error instanceof Error ? error.message : String(error));
       }
@@ -195,6 +227,12 @@ type SampleCommandOptions = {
   readonly format?: string;
 };
 
+type QueryCommandOptions = {
+  readonly format?: string;
+  readonly depth?: string;
+  readonly projectRoot?: string;
+};
+
 type ServeCommandOptions = {
   readonly port?: string;
   readonly open?: boolean;
@@ -202,6 +240,7 @@ type ServeCommandOptions = {
 
 type IndexOutputFormat = "json" | "table";
 type SampleOutputFormat = "json" | "table";
+type QueryOutputFormat = "json" | "table" | "tree";
 type SyncOutputFormat = "json" | "table";
 
 function parseIndexOutputFormat(value: string): IndexOutputFormat | undefined {
@@ -216,10 +255,20 @@ function parseSampleOutputFormat(value: string): SampleOutputFormat | undefined 
   return value === "json" || value === "table" ? value : undefined;
 }
 
+function parseQueryOutputFormat(value: string): QueryOutputFormat | undefined {
+  return value === "json" || value === "table" || value === "tree" ? value : undefined;
+}
+
 function parseSampleLimit(value: string): number | undefined {
   const limit = Number(value);
 
   return Number.isInteger(limit) && limit > 0 ? limit : undefined;
+}
+
+function parseQueryDepth(value: string): number | undefined {
+  const depth = Number(value);
+
+  return Number.isInteger(depth) && depth > 0 ? depth : undefined;
 }
 
 function parseServePort(value: string): number | undefined {
@@ -249,6 +298,42 @@ function formatSampleResult(result: SampleResult, format: SampleOutputFormat): s
         `${symbol.filePath}:${symbol.startLine} ${symbol.kind} ${symbol.qualifiedName} local=${symbol.isLocal} ${symbol.signature}`,
     ),
   ].join("\n");
+}
+
+function formatQueryResult(result: LuaGraphQueryResult, format: QueryOutputFormat): string {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+
+  if (format === "tree") {
+    return formatQueryTree(result);
+  }
+
+  return formatQueryTable(result);
+}
+
+function formatQueryTable(result: LuaGraphQueryResult): string {
+  return [
+    `expression: ${result.expression}`,
+    `count: ${result.count}`,
+    ...result.nodes.map(formatQueryNodeLine),
+  ].join("\n");
+}
+
+function formatQueryTree(result: LuaGraphQueryResult): string {
+  return [
+    result.expression,
+    ...result.nodes.map((node) => `  ${formatQueryNodeLine(node)}`),
+    ...result.edges.map((edge) => `  Calls ${edge.source} -> ${edge.target} @ ${edge.line}:${edge.column}`),
+  ].join("\n");
+}
+
+function formatQueryNodeLine(node: QueryNode): string {
+  if (node.type === "File") {
+    return `${node.kind} ${node.path}`;
+  }
+
+  return `${node.filePath}:${node.startLine} ${node.kind} ${node.qualifiedName} ${node.signature}`;
 }
 
 function formatSyncResult(result: SyncResult, format: SyncOutputFormat): string {

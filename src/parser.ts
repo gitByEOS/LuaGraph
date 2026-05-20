@@ -1,5 +1,5 @@
 import { normalizeRepositoryPath } from "./path.js";
-import type { LuaFile, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
+import type { LuaCall, LuaFile, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
 
 type SymbolDraft = {
   readonly kind: SymbolKind;
@@ -23,16 +23,19 @@ const classPattern =
 const tablePattern = /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\{|$)/;
 const functionPattern =
   /^(?<indent>\s*)(?<local>local\s+)?function\s+(?<qualifiedName>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/;
+const callPattern = /(?<![A-Za-z0-9_])(?<callee>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/g;
 
 // Phase 1 最小提取：行级模式只识别声明入口，不伪装完整 Lua AST。
 export function parseLuaFile(pathValue: string, source: string): LuaFile {
   const filePath = normalizeRepositoryPath(pathValue);
   const symbols = extractLuaSymbols(filePath, source);
+  const calls = extractLuaCalls(filePath, source);
 
   return {
     type: "File",
     path: filePath,
     symbols,
+    calls,
   };
 }
 
@@ -41,6 +44,12 @@ export function extractLuaSymbols(filePath: NormalizedPath, source: string): rea
   const drafts = extractSymbolDrafts(lines);
 
   return drafts.map((draft) => createSymbol(filePath, draft));
+}
+
+export function extractLuaCalls(filePath: NormalizedPath, source: string): readonly LuaCall[] {
+  return source
+    .split(/\r\n|\n|\r/)
+    .flatMap((line, index) => parseCallLine(filePath, stripLuaLine(line), index + 1));
 }
 
 function extractSymbolDrafts(lines: readonly string[]): readonly SymbolDraft[] {
@@ -84,6 +93,36 @@ function parseLine(line: string, lineNumber: number): readonly SymbolDraft[] {
   const functionSymbol = parseFunctionLine(line, lineNumber);
 
   return functionSymbol === undefined ? [] : [functionSymbol];
+}
+
+function parseCallLine(
+  filePath: NormalizedPath,
+  strippedLine: string,
+  lineNumber: number,
+): readonly LuaCall[] {
+  const calls: LuaCall[] = [];
+
+  for (const match of strippedLine.matchAll(callPattern)) {
+    const callee = match.groups?.callee;
+    const callIndex = match.index;
+    if (callee === undefined || callIndex === undefined || isDeclarationCallMatch(strippedLine, callIndex)) {
+      continue;
+    }
+
+    calls.push({
+      type: "Call",
+      filePath,
+      calleeQualifiedName: callee,
+      line: lineNumber,
+      column: callIndex + 1,
+    });
+  }
+
+  return calls;
+}
+
+function isDeclarationCallMatch(line: string, callIndex: number): boolean {
+  return /\bfunction\s+$/.test(line.slice(0, callIndex));
 }
 
 function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefined {

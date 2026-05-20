@@ -25,6 +25,7 @@ export type LuaFile = {
   readonly type: "File";
   readonly path: NormalizedPath;
   readonly symbols: readonly LuaSymbol[];
+  readonly calls: readonly LuaCall[];
 };
 
 export type LuaSymbol = {
@@ -42,6 +43,14 @@ export type LuaSymbol = {
   readonly isLocal: boolean;
   readonly isExported: boolean;
   readonly isUnresolved: boolean;
+};
+
+export type LuaCall = {
+  readonly type: "Call";
+  readonly filePath: NormalizedPath;
+  readonly calleeQualifiedName: string;
+  readonly line: number;
+  readonly column: number;
 };
 
 export type InitPlan = {
@@ -89,6 +98,7 @@ export type IndexResult = {
   readonly fileCount: number;
   readonly symbolCount: number;
   readonly containsCount: number;
+  readonly callsCount: number;
   readonly databaseDir: string;
 };
 
@@ -99,4 +109,42 @@ export type SyncResult = {
   readonly symbolCount: number;
   readonly containsCount: number;
   readonly databaseDir: string;
+};
+
+export type QueryNode = QueryFileNode | QuerySymbolNode;
+
+export type QueryFileNode = {
+  readonly type: "File";
+  readonly id: string;
+  readonly kind: "file";
+  readonly name: string;
+  readonly path: string;
+};
+
+export type QuerySymbolNode = {
+  readonly type: "Symbol";
+  readonly id: string;
+  readonly kind: string;
+  readonly name: string;
+  readonly qualifiedName: string;
+  readonly filePath: string;
+  readonly startLine: number;
+  readonly signature: string;
+};
+
+export type QueryCallEdge = {
+  readonly kind: "Calls";
+  readonly source: string;
+  readonly target: string;
+  readonly line: number;
+  readonly column: number;
+  readonly isResolved: boolean;
+};
+
+export type LuaGraphQueryResult = {
+  readonly projectRoot: string;
+  readonly expression: string;
+  readonly count: number;
+  readonly nodes: readonly QueryNode[];
+  readonly edges: readonly QueryCallEdge[];
 };
