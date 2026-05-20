@@ -4,14 +4,48 @@
     graph: "/api/graph",
     code: "/api/code",
   };
+  const SEARCH_DELAY_MS = 160;
+  const RESULT_RENDER_LIMIT = 200;
 
   const CATEGORY_COLORS = {
-    File: "#60a5fa",
-    table: "#fbbf24",
-    module: "#a78bfa",
-    function: "#34d399",
-    method: "#fb7185",
-    Symbol: "#94a3b8",
+    File: "#8aadf4",
+    table: "#eed49f",
+    module: "#c6a0f6",
+    function: "#a6da95",
+    method: "#f5a97f",
+    Symbol: "#cad3f5",
+  };
+  const CHART_THEME = {
+    darkMode: true,
+    color: Object.values(CATEGORY_COLORS),
+    backgroundColor: "rgba(4,8,16,1)",
+    textStyle: { color: "#e6edf7" },
+    graph: {
+      label: { color: "#e6edf7" },
+      lineStyle: { color: "#8aadf4", opacity: 0.36 },
+    },
+    legend: {
+      textStyle: { color: "#91a1b8" },
+    },
+  };
+  const CHART_PERFORMANCE_OPTION = {
+    animation: "auto",
+    animationDuration: 1000,
+    animationDurationUpdate: 500,
+    animationEasing: "cubicInOut",
+    animationEasingUpdate: "cubicInOut",
+    animationThreshold: 2000,
+    progressiveThreshold: 3000,
+    progressive: 400,
+    hoverLayerThreshold: 3000,
+    useUTC: false,
+    stateAnimation: {
+      duration: 500,
+      easing: "cubicInOut",
+    },
+    aria: {
+      enabled: true,
+    },
   };
 
   const state = {
@@ -21,7 +55,10 @@
     matchedIds: new Set(),
     neighborIds: new Set(),
     selectedId: undefined,
+    highlightedGraphId: undefined,
+    graphNodeIndexes: new Map(),
     chart: undefined,
+    searchTimer: undefined,
   };
 
   const dom = {};
@@ -51,7 +88,7 @@
   }
 
   function bindEvents() {
-    dom.searchInput.addEventListener("input", applySearch);
+    dom.searchInput.addEventListener("input", scheduleSearch);
     dom.kindFilter.addEventListener("change", applySearch);
     window.addEventListener("resize", () => state.chart && state.chart.resize());
   }
@@ -69,16 +106,20 @@
 
   async function loadGraph() {
     try {
-      showMessage("正在加载图谱...");
       const payload = await fetchJson(API.graph);
       state.graph = normalizeGraph(payload);
       state.filteredNodes = state.graph.nodes;
       renderKindFilter(state.graph.nodes);
-      applySearch();
-      hideMessage();
-      if (state.graph.nodes.length === 0) {
-        showMessage("暂无图谱数据，请先完成 index。", false);
-      }
+      requestAnimationFrame(() => {
+        renderGraph();
+        applySearch();
+        if (state.graph.nodes.length === 0) {
+          showMessage("暂无图谱数据，请先完成 index。", false);
+          return;
+        }
+
+        hideMessage();
+      });
     } catch (error) {
       state.graph = { nodes: [], edges: [] };
       state.filteredNodes = [];
@@ -155,6 +196,7 @@
       endLine: Number(raw.endLine || 0),
       isLocal: Boolean(raw.isLocal),
       isExported: Boolean(raw.isExported),
+      searchText: [name, raw.qualifiedName, filePath, raw.path, raw.signature].join("\n").toLowerCase(),
       raw,
     };
   }
@@ -183,31 +225,35 @@
   }
 
   function applySearch() {
+    if (state.searchTimer) {
+      clearTimeout(state.searchTimer);
+      state.searchTimer = undefined;
+    }
+
     const query = dom.searchInput.value.trim().toLowerCase();
     const kind = dom.kindFilter.value;
-    const matchedIds = new Set();
 
     const nodes = state.graph.nodes.filter((node) => {
       const isKindMatched = kind === "" || node.kind === kind;
       const isTextMatched = query === "" || searchableText(node).includes(query);
-      if (isKindMatched && isTextMatched) {
-        matchedIds.add(node.id);
-      }
 
       return isKindMatched && isTextMatched;
     });
 
     state.filteredNodes = nodes;
-    state.matchedIds = matchedIds;
-    state.neighborIds = findNeighborIds(matchedIds);
     renderResults(nodes);
-    renderGraph();
+  }
+
+  function scheduleSearch() {
+    if (state.searchTimer) {
+      clearTimeout(state.searchTimer);
+    }
+
+    state.searchTimer = setTimeout(applySearch, SEARCH_DELAY_MS);
   }
 
   function searchableText(node) {
-    return [node.name, node.qualifiedName, node.filePath, node.path, node.signature]
-      .join("\n")
-      .toLowerCase();
+    return node.searchText;
   }
 
   function findNeighborIds(ids) {
@@ -258,7 +304,9 @@
       return;
     }
 
-    for (const node of nodes) {
+    const visibleNodes = nodes.slice(0, RESULT_RENDER_LIMIT);
+    const fragment = document.createDocumentFragment();
+    for (const node of visibleNodes) {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
@@ -266,20 +314,30 @@
       button.innerHTML = `<span class="result-name"></span><span class="result-meta"></span>`;
       button.querySelector(".result-name").textContent = node.name;
       button.querySelector(".result-meta").textContent = `${node.kind} · ${node.filePath || node.path}`;
+      button.addEventListener("mouseenter", () => highlightGraphNode(node.id));
+      button.addEventListener("mouseleave", () => downplayGraphNode(node.id));
       button.addEventListener("click", () => selectNode(node.id, true));
       item.appendChild(button);
+      fragment.appendChild(item);
+    }
+
+    dom.resultList.appendChild(fragment);
+    if (nodes.length > RESULT_RENDER_LIMIT) {
+      const item = document.createElement("li");
+      item.className = "muted";
+      item.textContent = `仅显示前 ${RESULT_RENDER_LIMIT} 条，请继续输入缩小范围。`;
       dom.resultList.appendChild(item);
     }
   }
 
-  function renderGraph() {
+  function ensureChart() {
     if (!window.echarts) {
       showMessage("缺少 /vendor/echarts.min.js，图谱无法渲染。", true);
-      return;
+      return undefined;
     }
 
     if (!state.chart) {
-      state.chart = window.echarts.init(dom.graph);
+      state.chart = window.echarts.init(dom.graph, CHART_THEME);
       state.chart.on("click", (params) => {
         if (params.dataType === "node") {
           selectNode(params.data.id, false);
@@ -287,8 +345,19 @@
       });
     }
 
+    return state.chart;
+  }
+
+  function renderGraph() {
+    const chart = ensureChart();
+    if (!chart) {
+      return;
+    }
+
     const isNarrowed = state.matchedIds.size > 0;
     const categories = buildCategories(state.graph.nodes);
+    const categoryIndexes = new Map(categories.map((category, index) => [category.name, index]));
+    state.graphNodeIndexes = new Map(state.graph.nodes.map((node, index) => [node.id, index]));
     const nodes = state.graph.nodes.map((node) => {
       const isMatched = !isNarrowed || state.matchedIds.has(node.id);
       const isNeighbor = isNarrowed && state.neighborIds.has(node.id);
@@ -296,37 +365,32 @@
       const opacity = isMatched || isNeighbor || isSelected ? 1 : 0.16;
 
       return {
-        ...node,
-        category: categories.findIndex((category) => category.name === node.kind),
-        symbolSize: node.kind === "File" ? 38 : isSelected ? 30 : 22,
+        id: node.id,
+        name: node.name,
+        value: 1,
+        kind: node.kind,
+        qualifiedName: node.qualifiedName,
+        category: categoryIndexes.get(node.kind),
+        ...(node.type === "File" ? { symbolSize: 5 } : {}),
         itemStyle: {
-          color: CATEGORY_COLORS[node.kind] || CATEGORY_COLORS.Symbol,
           opacity,
-          borderColor: isSelected ? "#ffffff" : "transparent",
-          borderWidth: isSelected ? 3 : 0,
         },
         label: {
-          show: isSelected || isMatched,
+          show: false,
           opacity,
         },
       };
     });
-    const edges = state.graph.edges.map((edge) => {
-      const isRelated = !isNarrowed || state.matchedIds.has(edge.source) || state.matchedIds.has(edge.target);
+    const edges = state.graph.edges.map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+    }));
 
-      return {
-        ...edge,
-        lineStyle: {
-          color: isRelated ? "#67e8f9" : "#334155",
-          opacity: isRelated ? 0.72 : 0.08,
-          width: isRelated ? 1.8 : 1,
-        },
-      };
-    });
-
-    state.chart.setOption(
+    chart.setOption(
       {
-        backgroundColor: "transparent",
+        ...CHART_PERFORMANCE_OPTION,
+        backgroundColor: CHART_THEME.backgroundColor,
         tooltip: {
           formatter: (params) => {
             if (params.dataType === "edge") {
@@ -346,28 +410,46 @@
           {
             type: "graph",
             layout: "force",
+            animation: false,
             roam: true,
+            roamTrigger: "global",
+            scaleLimit: {
+              max: 8,
+              min: 0.5,
+            },
             draggable: true,
             categories,
             data: nodes,
-            links: edges,
-            edgeSymbol: ["none", "arrow"],
+            edges,
+            colorBy: "series",
+            progressiveThreshold: CHART_PERFORMANCE_OPTION.progressiveThreshold,
+            progressive: CHART_PERFORMANCE_OPTION.progressive,
+            hoverLayerThreshold: CHART_PERFORMANCE_OPTION.hoverLayerThreshold,
             label: {
               color: "#e6edf7",
               position: "right",
               formatter: "{b}",
             },
             force: {
-              repulsion: 180,
-              edgeLength: [60, 180],
-              gravity: 0.08,
+              edgeLength: 5,
+              repulsion: 20,
+              gravity: 0.2,
             },
             emphasis: {
               focus: "adjacency",
-              lineStyle: { width: 3 },
+              label: { show: true },
             },
           },
         ],
+        thumbnail: {
+          width: "15%",
+          height: "15%",
+          windowStyle: {
+            color: "rgba(140, 212, 250, 0.5)",
+            borderColor: "rgba(30, 64, 175, 0.7)",
+            opacity: 1,
+          },
+        },
       },
       true,
     );
@@ -385,16 +467,62 @@
       return;
     }
 
+    if (state.selectedId && state.selectedId !== id) {
+      downplayGraphNode(state.selectedId, true);
+    }
     state.selectedId = id;
     renderDetail(node);
     renderResults(state.filteredNodes);
-    renderGraph();
     fetchCodeSnippet(node);
+    highlightGraphNode(id);
 
     if (shouldFocus && state.chart) {
-      const dataIndex = state.graph.nodes.findIndex((item) => item.id === id);
+      const dataIndex = readGraphNodeIndex(id);
+      if (dataIndex === -1) {
+        return;
+      }
       state.chart.dispatchAction({ type: "focusNodeAdjacency", seriesIndex: 0, dataIndex });
     }
+  }
+
+  function highlightGraphNode(id) {
+    if (!state.chart) {
+      return;
+    }
+
+    const dataIndex = readGraphNodeIndex(id);
+    if (dataIndex === -1) {
+      return;
+    }
+
+    if (state.highlightedGraphId && state.highlightedGraphId !== id) {
+      downplayGraphNode(state.highlightedGraphId, true);
+    }
+
+    state.highlightedGraphId = id;
+    state.chart.dispatchAction({ type: "highlight", seriesIndex: 0, dataIndex });
+    state.chart.dispatchAction({ type: "focusNodeAdjacency", seriesIndex: 0, dataIndex });
+  }
+
+  function downplayGraphNode(id, shouldForce) {
+    if (!state.chart || (!shouldForce && id === state.selectedId)) {
+      return;
+    }
+
+    const dataIndex = readGraphNodeIndex(id);
+    if (dataIndex === -1) {
+      return;
+    }
+
+    if (state.highlightedGraphId === id) {
+      state.highlightedGraphId = undefined;
+    }
+    state.chart.dispatchAction({ type: "unfocusNodeAdjacency", seriesIndex: 0, dataIndex });
+    state.chart.dispatchAction({ type: "downplay", seriesIndex: 0, dataIndex });
+  }
+
+  function readGraphNodeIndex(id) {
+    return state.graphNodeIndexes.get(id) ?? -1;
   }
 
   function renderDetail(node) {

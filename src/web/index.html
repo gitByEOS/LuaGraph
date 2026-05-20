@@ -9,8 +9,8 @@
   <body>
     <header class="topbar">
       <div>
-        <p class="eyebrow">LuaGraph</p>
-        <h1>静态 Web 图谱</h1>
+        <p class="eyebrow">Lua-Graph</p>
+        <h1>Graph Workbench</h1>
       </div>
       <section id="statusPanel" class="status-grid" aria-label="项目状态">
         <article class="metric">
@@ -35,7 +35,7 @@
     <main class="layout">
       <aside class="panel sidebar" aria-label="搜索和过滤">
         <label class="field-label" for="searchInput">搜索</label>
-        <input id="searchInput" type="search" placeholder="name / qualifiedName / filePath / signature" autocomplete="off" />
+        <input id="searchInput" type="search" placeholder="Search symbols and files" autocomplete="off" />
 
         <label class="field-label" for="kindFilter">Kind</label>
         <select id="kindFilter">
@@ -56,11 +56,11 @@
 
       <aside class="panel detail-panel" aria-label="节点详情">
         <section>
-          <p class="eyebrow">节点详情</p>
+          <p class="eyebrow">Inspector</p>
           <div id="nodeDetail" class="detail-empty">点击图谱节点查看详情</div>
         </section>
         <section>
-          <p class="eyebrow">源码片段</p>
+          <p class="eyebrow">Source Preview</p>
           <pre id="codeSnippet" class="code-box">点击 Symbol 节点后加载源码</pre>
         </section>
       </aside>
