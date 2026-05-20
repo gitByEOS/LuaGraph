@@ -4,11 +4,12 @@ import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
+import { rebuildCallsRelationships } from "./call-graph.js";
 import { readConfig } from "./config.js";
 import { parseLuaFile } from "./parser.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
-import type { IndexResult, LuaCall, LuaFile, LuaSymbol, NormalizedPath, ScannedLuaFile } from "./types.js";
+import type { IndexResult, LuaFile, LuaSymbol, NormalizedPath, ScannedLuaFile } from "./types.js";
 
 export type IndexProjectOptions = {
   readonly force?: boolean;
@@ -69,7 +70,10 @@ export async function indexProject(
       reportFileProgress(options, file.path, index + 1, files.length);
     }
 
-    callsCount = await insertCallsRelationships(connection, parsedFiles);
+    callsCount = await rebuildCallsRelationships(
+      connection,
+      parsedFiles.map((file) => file.parsed),
+    );
   } finally {
     await connection.close();
     await database.close();
@@ -189,77 +193,6 @@ async function insertContainsRelationships(
       }),
     );
   }
-}
-
-async function insertCallsRelationships(
-  connection: Connection,
-  parsedFiles: readonly ParsedProjectFile[],
-): Promise<number> {
-  const symbols = parsedFiles.flatMap((file) => [...file.parsed.symbols]);
-  const uniqueSymbols = createUniqueSymbolMap(symbols);
-  const stmt = await connection.prepare(
-    "MATCH (source:Symbol {id: $sourceId}), (target:Symbol {id: $targetId}) CREATE (source)-[r:Calls]->(target) SET r.line = $line, r.`column` = $callColumn, r.isResolved = $isResolved",
-  );
-  let callsCount = 0;
-
-  for (const parsedFile of parsedFiles) {
-    for (const call of parsedFile.parsed.calls) {
-      const source = findCallerSymbol(parsedFile.parsed.symbols, call);
-      const target = uniqueSymbols.get(call.calleeQualifiedName);
-
-      if (source === undefined || target === undefined) {
-        continue;
-      }
-
-      closeResult(
-        await connection.execute(stmt, {
-          sourceId: source.id,
-          targetId: target.id,
-          line: BigInt(call.line),
-          callColumn: BigInt(call.column),
-          isResolved: true,
-        }),
-      );
-      callsCount += 1;
-    }
-  }
-
-  return callsCount;
-}
-
-function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): Map<string, LuaSymbol> {
-  const groups = new Map<string, LuaSymbol[]>();
-
-  for (const symbol of symbols) {
-    groups.set(symbol.qualifiedName, [...(groups.get(symbol.qualifiedName) ?? []), symbol]);
-  }
-
-  return new Map(
-    [...groups]
-      .filter((entry): entry is [string, [LuaSymbol]] => entry[1].length === 1)
-      .map(([qualifiedName, [symbol]]) => [qualifiedName, symbol]),
-  );
-}
-
-function findCallerSymbol(symbols: readonly LuaSymbol[], call: LuaCall): LuaSymbol | undefined {
-  return symbols
-    .filter((symbol) => isCallableSymbol(symbol) && containsLine(symbol, call.line))
-    .sort(compareSymbolScope)[0];
-}
-
-function isCallableSymbol(symbol: LuaSymbol): boolean {
-  return symbol.kind === "function" || symbol.kind === "method";
-}
-
-function containsLine(symbol: LuaSymbol, line: number): boolean {
-  return symbol.startLine <= line && line <= symbol.endLine;
-}
-
-function compareSymbolScope(left: LuaSymbol, right: LuaSymbol): number {
-  const leftSpan = left.endLine - left.startLine;
-  const rightSpan = right.endLine - right.startLine;
-
-  return leftSpan - rightSpan || right.startLine - left.startLine;
 }
 
 function closeResult(result: QueryResult | QueryResult[]): void {

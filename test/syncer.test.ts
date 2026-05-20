@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { indexProject } from "../src/indexer.js";
 import { initializeProject } from "../src/init.js";
+import { queryProject } from "../src/query.js";
 import { getProjectStatus } from "../src/status.js";
 import { syncProject } from "../src/syncer.js";
 
@@ -54,6 +55,65 @@ describe("syncProject", () => {
       symbolCount: 4,
       edgeCount: 4,
       pendingSyncChangeCount: 0,
+    });
+  });
+
+  it("同步后重建 Calls 并移除旧调用边", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "src/main.lua",
+      [
+        "function foo()",
+        "end",
+        "function init()",
+        "  foo()",
+        "end",
+        "function boot()",
+        "  init()",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    await expect(queryProject(projectRoot, "callees:init")).resolves.toMatchObject({
+      count: 1,
+      nodes: [{ qualifiedName: "foo" }],
+    });
+
+    await writeLuaFile(
+      projectRoot,
+      "src/main.lua",
+      [
+        "function foo()",
+        "end",
+        "function bar()",
+        "end",
+        "function init()",
+        "  bar()",
+        "end",
+        "function boot()",
+        "  init()",
+        "end",
+      ].join("\n"),
+    );
+
+    await syncProject(projectRoot);
+
+    await expect(queryProject(projectRoot, "callees:init")).resolves.toMatchObject({
+      count: 1,
+      nodes: [{ qualifiedName: "bar" }],
+    });
+    await expect(queryProject(projectRoot, "callers:foo")).resolves.toMatchObject({
+      count: 0,
+      nodes: [],
+      edges: [],
+    });
+    await expect(queryProject(projectRoot, "callers:bar")).resolves.toMatchObject({
+      count: 1,
+      nodes: [{ qualifiedName: "init" }],
     });
   });
 });

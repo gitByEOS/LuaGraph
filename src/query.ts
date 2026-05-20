@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
-import { Connection, Database, type QueryResult } from "kuzu";
+import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
 import { getKuzuDatabasePath } from "./store.js";
@@ -25,11 +25,13 @@ type ParsedExpression = {
   readonly terms: readonly QueryTerm[];
 };
 
-type GraphData = {
-  readonly nodes: readonly QueryNode[];
-  readonly symbols: readonly QuerySymbolNode[];
-  readonly calls: readonly QueryCallEdge[];
+type QueryFilters = {
+  readonly name?: string;
+  readonly kind?: string;
 };
+
+type QueryParameters = Record<string, KuzuValue>;
+type SymbolRow = Record<string, unknown>;
 
 export async function queryProject(
   projectRoot: string,
@@ -48,22 +50,29 @@ export async function queryProject(
   const databasePath = getKuzuDatabasePath(resolve(resolvedProjectRoot, config.databaseDir));
   await assertIndexedDatabase(databasePath);
 
-  const graph = await readGraph(databasePath);
-  const { nodes, edges } = evaluateExpression(parsedExpression, graph, depth);
+  const database = new Database(databasePath, undefined, undefined, true);
+  const connection = new Connection(database);
 
-  return {
-    projectRoot: resolvedProjectRoot,
-    expression: parsedExpression.source,
-    count: nodes.length,
-    nodes,
-    edges,
-  };
+  try {
+    const { nodes, edges } = await executeQuery(connection, parsedExpression, depth);
+
+    return {
+      projectRoot: resolvedProjectRoot,
+      expression: parsedExpression.source,
+      count: nodes.length,
+      nodes,
+      edges,
+    };
+  } finally {
+    await connection.close();
+    await database.close();
+  }
 }
 
 function parseQueryExpression(expression: string): ParsedExpression {
   const source = expression.trim();
   const terms = source.length === 0 ? [] : source.split(/\s+/).map(parseQueryTerm);
-  const relationTermCount = terms.filter((term) => term.key === "callers" || term.key === "callees").length;
+  const relationTermCount = terms.filter(isRelationTerm).length;
 
   if (terms.length === 0) {
     throw new Error("query 表达式不能为空");
@@ -101,200 +110,233 @@ function normalizeDepth(depth: number): number {
   return depth;
 }
 
-async function assertIndexedDatabase(databasePath: string): Promise<void> {
-  if (!(await pathExists(databasePath))) {
-    throw new Error("项目尚未 index：缺少 Kuzu 数据库");
-  }
-}
-
-async function readGraph(databasePath: string): Promise<GraphData> {
-  const database = new Database(databasePath, undefined, undefined, true);
-  const connection = new Connection(database);
-
-  try {
-    const files = await readFileNodes(connection);
-    const symbols = await readSymbolNodes(connection);
-    const calls = await readCallEdges(connection);
-
-    return {
-      nodes: [...files, ...symbols],
-      symbols,
-      calls,
-    };
-  } finally {
-    await connection.close();
-    await database.close();
-  }
-}
-
-async function readFileNodes(connection: Connection): Promise<QueryNode[]> {
-  const rows = await queryRows(connection, "MATCH (file:File) RETURN file.path AS path;");
-
-  return rows.map((row) => {
-    const path = readString(row.path, "path");
-
-    return {
-      type: "File",
-      id: path,
-      kind: "file",
-      name: basename(path),
-      path,
-    };
-  });
-}
-
-async function readSymbolNodes(connection: Connection): Promise<QuerySymbolNode[]> {
-  const rows = await queryRows(
-    connection,
-    `MATCH (symbol:Symbol)
-RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
-  symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
-  symbol.startLine AS startLine, symbol.signature AS signature;`,
-  );
-
-  return rows.map((row) => ({
-    type: "Symbol",
-    id: readString(row.id, "id"),
-    kind: readString(row.kind, "kind"),
-    name: readString(row.name, "name"),
-    qualifiedName: readString(row.qualifiedName, "qualifiedName"),
-    filePath: readString(row.filePath, "filePath"),
-    startLine: readNumber(row.startLine, "startLine"),
-    signature: readString(row.signature, "signature"),
-  }));
-}
-
-async function readCallEdges(connection: Connection): Promise<QueryCallEdge[]> {
-  const rows = await queryRows(
-    connection,
-    `MATCH (source:Symbol)-[call:Calls]->(target:Symbol)
-RETURN source.id AS source, target.id AS target, call.line AS line,
-  call.\`column\` AS callColumn, call.isResolved AS isResolved;`,
-  );
-
-  return rows.map((row) => ({
-    kind: "Calls",
-    source: readString(row.source, "source"),
-    target: readString(row.target, "target"),
-    line: readNumber(row.line, "line"),
-    column: readNumber(row.callColumn, "callColumn"),
-    isResolved: readBoolean(row.isResolved, "isResolved"),
-  }));
-}
-
-function evaluateExpression(
+async function executeQuery(
+  connection: Connection,
   expression: ParsedExpression,
-  graph: GraphData,
   depth: number,
-): Pick<LuaGraphQueryResult, "nodes" | "edges"> {
+): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
   const relationTerm = expression.terms.find(isRelationTerm);
 
   if (relationTerm !== undefined) {
-    return evaluateRelationTerm(relationTerm, expression.terms, graph, depth);
+    return executeRelationQuery(connection, relationTerm, createFilters(expression.terms, relationTerm), depth);
   }
 
-  return {
-    nodes: sortNodes(graph.nodes.filter((node) => matchesTerms(node, expression.terms))),
-    edges: [],
-  };
+  const filters = createFilters(expression.terms);
+  const nodes = [
+    ...(await queryFileNodes(connection, filters)),
+    ...(await querySymbolNodes(connection, filters)),
+  ];
+
+  return { nodes: sortNodes(nodes), edges: [] };
 }
 
-function evaluateRelationTerm(
-  relationTerm: RelationQueryTerm,
+function createFilters(
   terms: readonly QueryTerm[],
-  graph: GraphData,
-  depth: number,
-): Pick<LuaGraphQueryResult, "nodes" | "edges"> {
-  const seeds = graph.symbols.filter((symbol) => matchesName(symbol, relationTerm.value));
-  const seedIds = new Set(seeds.map((symbol) => symbol.id));
-  const traversedEdges = collectRelationEdges(relationTerm.key, seedIds, graph.calls, depth);
-  const resultIds = new Set(
-    traversedEdges.map((edge) => (relationTerm.key === "callers" ? edge.source : edge.target)),
-  );
-  const filteredTerms = terms.filter((term) => term !== relationTerm);
-  const nodes = graph.symbols.filter((symbol) => resultIds.has(symbol.id) && matchesTerms(symbol, filteredTerms));
+  excludedTerm?: QueryTerm,
+): QueryFilters {
+  const activeTerms = terms.filter((term) => term !== excludedTerm);
 
   return {
-    nodes: sortNodes(nodes),
-    edges: sortEdges(traversedEdges.filter((edge) => hasResultEndpoint(edge, relationTerm.key, resultIds))),
+    ...readFilter(activeTerms, "name"),
+    ...readFilter(activeTerms, "kind"),
   };
 }
 
-function isRelationTerm(term: QueryTerm): term is RelationQueryTerm {
-  return term.key === "callers" || term.key === "callees";
+function readFilter(terms: readonly QueryTerm[], key: "name" | "kind"): QueryFilters {
+  const term = terms.find((item) => item.key === key);
+
+  return term === undefined ? {} : { [key]: term.value };
 }
 
-function collectRelationEdges(
-  relation: "callers" | "callees",
-  seedIds: ReadonlySet<string>,
-  calls: readonly QueryCallEdge[],
+async function queryFileNodes(
+  connection: Connection,
+  filters: QueryFilters,
+): Promise<QueryNode[]> {
+  if (filters.kind !== undefined && filters.kind !== "file") {
+    return [];
+  }
+
+  if (filters.name !== undefined) {
+    const rows = await queryRows(
+      connection,
+      "MATCH (file:File) WHERE file.path = $name RETURN file.path AS path;",
+      { name: filters.name },
+    );
+
+    return rows.map(toFileNode);
+  }
+
+  if (filters.kind === "file") {
+    const rows = await queryRows(connection, "MATCH (file:File) RETURN file.path AS path;");
+
+    return rows.map(toFileNode);
+  }
+
+  return [];
+}
+
+async function querySymbolNodes(
+  connection: Connection,
+  filters: QueryFilters,
+): Promise<QuerySymbolNode[]> {
+  const { whereClause, parameters } = createSymbolWhereClause("symbol", filters);
+  const rows = await queryRows(
+    connection,
+    `MATCH (symbol:Symbol)
+${whereClause}
+RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
+  symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
+  symbol.startLine AS startLine, symbol.signature AS signature;`,
+    parameters,
+  );
+
+  return rows.map(toSymbolNode);
+}
+
+async function executeRelationQuery(
+  connection: Connection,
+  relationTerm: RelationQueryTerm,
+  filters: QueryFilters,
   depth: number,
-): readonly QueryCallEdge[] {
-  const edges: QueryCallEdge[] = [];
-  let frontier = new Set(seedIds);
-  const visited = new Set(seedIds);
+): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
+  const seeds = await querySeedSymbols(connection, relationTerm.value);
+  const nodesById = new Map<string, QuerySymbolNode>();
+  const edgesByKey = new Map<string, QueryCallEdge>();
+  const visited = new Set(seeds.map((symbol) => symbol.id));
+  let frontier = seeds.map((symbol) => symbol.id);
 
-  for (let level = 0; level < depth; level += 1) {
-    const nextFrontier = new Set<string>();
+  for (let level = 0; level < depth && frontier.length > 0; level += 1) {
+    const nextFrontier: string[] = [];
 
-    for (const edge of calls) {
-      const origin = relation === "callers" ? edge.target : edge.source;
-      const next = relation === "callers" ? edge.source : edge.target;
+    for (const originId of frontier) {
+      const rows = await queryRelationRows(connection, relationTerm.key, originId, filters);
 
-      if (!frontier.has(origin)) {
-        continue;
-      }
+      for (const row of rows) {
+        const node = toSymbolNode(row);
+        const edge = toCallEdge(row);
 
-      edges.push(edge);
-      if (!visited.has(next)) {
-        visited.add(next);
-        nextFrontier.add(next);
+        nodesById.set(node.id, node);
+        edgesByKey.set(edgeKey(edge), edge);
+
+        if (!visited.has(node.id)) {
+          visited.add(node.id);
+          nextFrontier.push(node.id);
+        }
       }
     }
 
     frontier = nextFrontier;
   }
 
-  return edges;
+  return {
+    nodes: sortNodes([...nodesById.values()]),
+    edges: sortEdges([...edgesByKey.values()]),
+  };
 }
 
-function hasResultEndpoint(
-  edge: QueryCallEdge,
+async function querySeedSymbols(
+  connection: Connection,
+  name: string,
+): Promise<QuerySymbolNode[]> {
+  const rows = await queryRows(
+    connection,
+    `MATCH (symbol:Symbol)
+WHERE symbol.name = $name OR symbol.qualifiedName = $name
+RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
+  symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
+  symbol.startLine AS startLine, symbol.signature AS signature;`,
+    { name },
+  );
+
+  return rows.map(toSymbolNode);
+}
+
+async function queryRelationRows(
+  connection: Connection,
   relation: "callers" | "callees",
-  resultIds: ReadonlySet<string>,
-): boolean {
-  return resultIds.has(relation === "callers" ? edge.source : edge.target);
+  originId: string,
+  filters: QueryFilters,
+): Promise<SymbolRow[]> {
+  const { whereClause, parameters } = createRelationWhereClause(filters);
+  const match =
+    relation === "callers"
+      ? "MATCH (symbol:Symbol)-[call:Calls]->(origin:Symbol)"
+      : "MATCH (origin:Symbol)-[call:Calls]->(symbol:Symbol)";
+  const source = relation === "callers" ? "symbol.id" : "origin.id";
+  const target = relation === "callers" ? "origin.id" : "symbol.id";
+
+  return queryRows(
+    connection,
+    `${match}
+WHERE origin.id = $originId${whereClause}
+RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
+  symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
+  symbol.startLine AS startLine, symbol.signature AS signature,
+  ${source} AS edgeSource, ${target} AS edgeTarget, call.line AS line,
+  call.\`column\` AS callColumn, call.isResolved AS isResolved;`,
+    { ...parameters, originId },
+  );
 }
 
-function matchesTerms(node: QueryNode, terms: readonly QueryTerm[]): boolean {
-  return terms.every((term) => matchesTerm(node, term));
-}
+function createSymbolWhereClause(
+  variable: string,
+  filters: QueryFilters,
+): { readonly whereClause: string; readonly parameters: QueryParameters } {
+  const conditions: string[] = [];
+  const parameters: QueryParameters = {};
 
-function matchesTerm(node: QueryNode, term: QueryTerm): boolean {
-  if (term.key === "name") {
-    return matchesName(node, term.value);
+  if (filters.name !== undefined) {
+    conditions.push(`(${variable}.name = $name OR ${variable}.qualifiedName = $name)`);
+    parameters.name = filters.name;
   }
 
-  if (term.key === "kind") {
-    return node.kind === term.value;
+  if (filters.kind !== undefined) {
+    conditions.push(`${variable}.kind = $kind`);
+    parameters.kind = filters.kind;
   }
 
-  return true;
+  return {
+    whereClause: conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`,
+    parameters,
+  };
 }
 
-function matchesName(node: QueryNode, value: string): boolean {
-  if (node.type === "File") {
-    return node.name === value || node.path === value;
+function createRelationWhereClause(
+  filters: QueryFilters,
+): { readonly whereClause: string; readonly parameters: QueryParameters } {
+  const { whereClause, parameters } = createSymbolWhereClause("symbol", filters);
+
+  if (whereClause.length === 0) {
+    return { whereClause: "", parameters };
   }
 
-  return node.name === value || node.qualifiedName === value;
+  return {
+    whereClause: ` AND ${whereClause.slice("WHERE ".length)}`,
+    parameters,
+  };
 }
 
-async function queryRows(connection: Connection, cypher: string): Promise<Record<string, unknown>[]> {
+async function assertIndexedDatabase(databasePath: string): Promise<void> {
+  if (!(await pathExists(databasePath))) {
+    throw new Error("项目尚未 index：缺少 Kuzu 数据库");
+  }
+}
+
+async function queryRows(
+  connection: Connection,
+  cypher: string,
+  parameters: QueryParameters = {},
+): Promise<Record<string, unknown>[]> {
   let result: QueryResult | QueryResult[] | undefined;
 
   try {
-    result = await connection.query(cypher);
+    if (Object.keys(parameters).length === 0) {
+      result = await connection.query(cypher);
+    } else {
+      const statement = await connection.prepare(cypher);
+      result = await connection.execute(statement, parameters);
+    }
+
     const queryResult = Array.isArray(result) ? result[0] : result;
     if (queryResult === undefined) {
       throw new Error("query 查询未返回结果");
@@ -304,6 +346,50 @@ async function queryRows(connection: Connection, cypher: string): Promise<Record
   } finally {
     closeQueryResult(result);
   }
+}
+
+function toFileNode(row: Record<string, unknown>): QueryNode {
+  const path = readString(row.path, "path");
+
+  return {
+    type: "File",
+    id: path,
+    kind: "file",
+    name: basename(path),
+    path,
+  };
+}
+
+function toSymbolNode(row: Record<string, unknown>): QuerySymbolNode {
+  return {
+    type: "Symbol",
+    id: readString(row.id, "id"),
+    kind: readString(row.kind, "kind"),
+    name: readString(row.name, "name"),
+    qualifiedName: readString(row.qualifiedName, "qualifiedName"),
+    filePath: readString(row.filePath, "filePath"),
+    startLine: readNumber(row.startLine, "startLine"),
+    signature: readString(row.signature, "signature"),
+  };
+}
+
+function toCallEdge(row: Record<string, unknown>): QueryCallEdge {
+  return {
+    kind: "Calls",
+    source: readString(row.edgeSource, "edgeSource"),
+    target: readString(row.edgeTarget, "edgeTarget"),
+    line: readNumber(row.line, "line"),
+    column: readNumber(row.callColumn, "callColumn"),
+    isResolved: readBoolean(row.isResolved, "isResolved"),
+  };
+}
+
+function isRelationTerm(term: QueryTerm): term is RelationQueryTerm {
+  return term.key === "callers" || term.key === "callees";
+}
+
+function edgeKey(edge: QueryCallEdge): string {
+  return `${edge.source}->${edge.target}@${edge.line}:${edge.column}`;
 }
 
 function sortNodes(nodes: readonly QueryNode[]): QueryNode[] {

@@ -17,7 +17,7 @@ echo "1. Typecheck"
 npm run typecheck
 
 echo "2. Query tests"
-npx vitest run test/query.test.ts test/indexer.test.ts test/cli.test.ts
+npx vitest run test/query.test.ts test/indexer.test.ts test/syncer.test.ts test/cli.test.ts
 
 echo "3. Build"
 npm run build
@@ -68,5 +68,39 @@ if (
   process.exit(1);
 }
 ' "$NAME_RESULT" "$KIND_RESULT" "$CALLEES_RESULT" "$CALLERS_RESULT"
+
+cat > "$TEMP_PROJECT/src/main.lua" <<'LUA'
+function foo()
+end
+function bar()
+end
+function init()
+  bar()
+end
+function boot()
+  init()
+end
+LUA
+
+node "$PROJECT_DIR/dist/cli.js" sync "$TEMP_PROJECT" --format json >/dev/null
+SYNC_CALLEES_RESULT="$(cd "$TEMP_PROJECT" && node "$PROJECT_DIR/dist/cli.js" query callees:init --format json)"
+SYNC_OLD_CALLERS_RESULT="$(cd "$TEMP_PROJECT" && node "$PROJECT_DIR/dist/cli.js" query callers:foo --format json)"
+SYNC_NEW_CALLERS_RESULT="$(cd "$TEMP_PROJECT" && node "$PROJECT_DIR/dist/cli.js" query callers:bar --format json)"
+
+node -e '
+const calleesResult = JSON.parse(process.argv[1]);
+const oldCallersResult = JSON.parse(process.argv[2]);
+const newCallersResult = JSON.parse(process.argv[3]);
+
+if (
+  JSON.stringify(calleesResult.nodes.map((node) => node.qualifiedName)) !== JSON.stringify(["bar"]) ||
+  oldCallersResult.count !== 0 ||
+  oldCallersResult.edges.length !== 0 ||
+  JSON.stringify(newCallersResult.nodes.map((node) => node.qualifiedName)) !== JSON.stringify(["init"])
+) {
+  console.error(`sync 后 query 结果不符合预期: ${JSON.stringify({ calleesResult, oldCallersResult, newCallersResult })}`);
+  process.exit(1);
+}
+' "$SYNC_CALLEES_RESULT" "$SYNC_OLD_CALLERS_RESULT" "$SYNC_NEW_CALLERS_RESULT"
 
 echo "test-query passed"

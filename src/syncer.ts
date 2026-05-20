@@ -4,6 +4,7 @@ import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
+import { deleteCallsForFiles, rebuildCallsRelationships } from "./call-graph.js";
 import { configPath, readConfig } from "./config.js";
 import { parseLuaFile } from "./parser.js";
 import { scanLuaFiles } from "./scanner.js";
@@ -47,11 +48,20 @@ export async function syncProject(projectRoot: string): Promise<SyncResult> {
       (path) => !currentFiles.some((file) => file.file.path === path),
     );
 
-    await removeIndexedFiles(connection, [
+    const affectedFilePaths = [
       ...removedFilePaths,
       ...changedFiles.map((file) => file.file.path),
-    ]);
+    ];
+
+    await deleteCallsForFiles(connection, affectedFilePaths);
+    await removeIndexedFiles(connection, affectedFilePaths);
     await writeChangedFiles(connection, changedFiles);
+    if (affectedFilePaths.length > 0) {
+      await rebuildCallsRelationships(
+        connection,
+        currentFiles.map((file) => parseLuaFile(file.file.path, file.content)),
+      );
+    }
 
     return {
       scannedFileCount: files.length,

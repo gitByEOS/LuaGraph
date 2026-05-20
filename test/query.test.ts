@@ -63,7 +63,16 @@ describe("queryProject", () => {
     expect(result.nodes.map((node) => (node.type === "Symbol" ? node.qualifiedName : node.path))).toEqual([
       "boot",
     ]);
-    expect(result.edges).toHaveLength(1);
+    expect(result.edges).toEqual([
+      expect.objectContaining({
+        kind: "Calls",
+        line: 14,
+        column: 3,
+        isResolved: true,
+      }),
+    ]);
+    expect(result.edges[0]?.source).toContain("#function#boot#");
+    expect(result.edges[0]?.target).toContain("#function#init#");
   });
 
   it("查询 callees", async () => {
@@ -75,7 +84,11 @@ describe("queryProject", () => {
       "M.foo",
       "obj:foo",
     ]);
-    expect(result.edges).toHaveLength(3);
+    expect(result.edges.map((edge) => [edge.line, edge.column, edge.isResolved])).toEqual([
+      [9, 3, true],
+      [10, 3, true],
+      [11, 3, true],
+    ]);
   });
 });
 
