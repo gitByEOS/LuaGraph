@@ -20,10 +20,21 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library 骨架，工具链使用 Vite+ 
 在项目根目录运行：
 
 ```bash
+submit/test-agent-init.sh
 submit/test-agent-path.sh
 ```
 
 脚本会从自身位置定位项目根，并依次执行：
+
+`submit/test-agent-init.sh`：
+
+```bash
+vp install
+vp test
+vp check
+```
+
+`submit/test-agent-path.sh`：
 
 ```bash
 vp test test/path.test.ts
