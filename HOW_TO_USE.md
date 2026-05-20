@@ -3,7 +3,22 @@
 ## 安装
 
 ```bash
+# 1. 安装依赖
 pnpm install
+
+# 2. 构建（每次合并新代码后必须执行）
+pnpm run build
+
+# 3. 全局安装（可选，否则用 node dist/cli.js 代替 luagraph）
+pnpm link --global
+```
+
+未全局安装时，所有 `luagraph` 命令改用 `node dist/cli.js`：
+
+```bash
+node dist/cli.js init <path>        # 代替 luagraph init
+node dist/cli.js status <path>      # 代替 luagraph status
+node dist/cli.js index <path>       # 代替 luagraph index
 ```
 
 ## 使用方式
