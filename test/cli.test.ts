@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCli } from "../src/cli.js";
+import { indexProject } from "../src/indexer.js";
+import { initializeProject } from "../src/init.js";
 
 const tempRoots: string[] = [];
 
@@ -162,6 +164,59 @@ describe("luagraph index CLI", () => {
     await expect(cli.parseAsync(["node", "luagraph", "analyze"], { from: "node" })).rejects.toThrow(
       "unknown command 'analyze'",
     );
+  });
+});
+
+describe("luagraph sample CLI", () => {
+  afterEach(async () => {
+    await Promise.all(
+      tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
+  it("无参数时默认使用当前目录", async () => {
+    const projectRoot = await createTempProject();
+    const previousCwd = process.cwd();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const cli = createTestCli();
+
+    try {
+      await writeLuaFile(projectRoot, "src/player.lua", "function spawnPlayer()\nend\n");
+      await initializeProject(projectRoot);
+      await indexProject(projectRoot);
+      process.chdir(projectRoot);
+
+      await cli.parseAsync(["node", "luagraph", "sample", "--limit", "1"], { from: "node" });
+
+      expect(log).toHaveBeenCalledTimes(1);
+      const output = log.mock.calls[0]?.[0];
+      expect(typeof output).toBe("string");
+      expect(JSON.parse(output as string)).toMatchObject({
+        projectRoot: await realpath(projectRoot),
+        count: 1,
+        symbols: [
+          {
+            kind: "function",
+            name: "spawnPlayer",
+            qualifiedName: "spawnPlayer",
+            filePath: "src/player.lua",
+            startLine: 1,
+            isLocal: false,
+            signature: "function spawnPlayer()",
+          },
+        ],
+      });
+    } finally {
+      process.chdir(previousCwd);
+      log.mockRestore();
+    }
+  });
+
+  it("help 包含 sample 命令", () => {
+    const cli = createTestCli();
+    const helpText = cli.helpInformation();
+
+    expect(helpText).toContain("sample");
   });
 });
 

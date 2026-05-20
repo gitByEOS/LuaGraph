@@ -69,6 +69,22 @@ export type StatusResult = {
   readonly schemaCount: number;
 };
 
+export type SampleSymbol = {
+  readonly kind: string;
+  readonly name: string;
+  readonly qualifiedName: string;
+  readonly filePath: string;
+  readonly startLine: number;
+  readonly isLocal: boolean;
+  readonly signature: string;
+};
+
+export type SampleResult = {
+  readonly projectRoot: string;
+  readonly count: number;
+  readonly symbols: readonly SampleSymbol[];
+};
+
 export type IndexResult = {
   readonly fileCount: number;
   readonly symbolCount: number;

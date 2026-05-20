@@ -20,6 +20,8 @@ node dist/cli.js init <path>        # 代替 luagraph init
 node dist/cli.js status             # 代替 luagraph status，默认当前目录
 node dist/cli.js status <path>      # 显式查看指定项目
 node dist/cli.js index <path>       # 代替 luagraph index
+node dist/cli.js sample             # 代替 luagraph sample，默认当前目录
+node dist/cli.js sample <path>      # index 后抽查指定项目
 ```
 
 ## 使用方式
@@ -63,7 +65,36 @@ luagraph index /path/to/your/lua/project --force --format json
 }
 ```
 
-### 3. 查看状态
+### 3. 抽查索引结果
+
+`sample` 和 `status` 同级，用于 index 后从 Kuzu 抽查少量 Symbol 数据，不读取源码、不做 dump、不做可视化。无参数时默认使用当前目录：
+
+```bash
+luagraph sample
+luagraph sample /path/to/your/lua/project --limit 20 --format json
+luagraph sample /path/to/your/lua/project --format table
+```
+
+输出 JSON：
+```json
+{
+  "projectRoot": "/path/to/your/lua/project",
+  "count": 2,
+  "symbols": [
+    {
+      "kind": "table",
+      "name": "Player",
+      "qualifiedName": "Player",
+      "filePath": "src/player.lua",
+      "startLine": 1,
+      "isLocal": false,
+      "signature": "Player = class(\"Player\")"
+    }
+  ]
+}
+```
+
+### 4. 查看状态
 
 查询 Kuzu 图数据库中已存储的 File、Symbol、关系、解析错误、符号分类和待同步变化数量。无参数时默认使用当前目录：
 
@@ -92,7 +123,7 @@ luagraph status --project-root /path/to/your/lua/project
 }
 ```
 
-### 4. 完整工作流示例
+### 5. 完整工作流示例
 
 ```bash
 # 进入 LuaGraph 项目根
@@ -108,6 +139,7 @@ node dist/cli.js init .
 node dist/cli.js index . --force --format json
 
 # 验证当前目录
+node dist/cli.js sample
 node dist/cli.js status
 ```
 
@@ -127,6 +159,7 @@ npx vitest run
 npx vitest run test/indexer.test.ts    # 索引模块
 npx vitest run test/scanner.test.ts    # 扫描模块
 npx vitest run test/status.test.ts     # 状态模块
+npx vitest run test/sample.test.ts     # 抽查模块
 npx vitest run test/verify.test.ts     # 验证模块
 ```
 
@@ -139,6 +172,7 @@ submit/test-agent-status.sh    # 状态验收
 submit/test-index.sh           # 索引验收
 submit/test-agent-verify.sh    # 完整验证（CLI 方式）
 submit/test-status-accuracy.sh # status 准确性验收
+submit/test-sample.sh          # sample 抽查验收
 ```
 
 ### 快速验证（最快）

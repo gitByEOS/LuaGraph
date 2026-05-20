@@ -6,7 +6,9 @@ import { Command } from "commander";
 
 import { indexProject } from "./indexer.js";
 import { initializeProject } from "./init.js";
+import { sampleProject } from "./sample.js";
 import { getProjectStatus } from "./status.js";
+import type { SampleResult } from "./types.js";
 
 export function createCli(): Command {
   const program = new Command();
@@ -42,6 +44,34 @@ export function createCli(): Command {
       try {
         const result = await getProjectStatus(targetProjectRoot);
         console.log(JSON.stringify(result, null, 2));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+  program
+    .command("sample")
+    .argument("[project_root]", "项目根目录，默认当前目录")
+    .option("--limit <n>", "抽查符号数量", "20")
+    .option("--format <format>", "输出格式：json|table", "json")
+    .description("抽查已索引的 Lua 符号")
+    .action(async (projectRoot?: string, options?: SampleCommandOptions) => {
+      const outputFormat = parseSampleOutputFormat(options?.format ?? "json");
+      const limit = parseSampleLimit(options?.limit ?? "20");
+
+      if (outputFormat === undefined) {
+        program.error("sample --format 仅支持 json 或 table");
+        return;
+      }
+
+      if (limit === undefined) {
+        program.error("sample --limit 必须是正整数");
+        return;
+      }
+
+      try {
+        const result = await sampleProject(projectRoot ?? process.cwd(), { limit });
+        console.log(formatSampleResult(result, outputFormat));
       } catch (error) {
         program.error(error instanceof Error ? error.message : String(error));
       }
@@ -96,10 +126,26 @@ type IndexCommandOptions = {
   readonly format?: string;
 };
 
+type SampleCommandOptions = {
+  readonly limit?: string;
+  readonly format?: string;
+};
+
 type IndexOutputFormat = "json" | "table";
+type SampleOutputFormat = "json" | "table";
 
 function parseIndexOutputFormat(value: string): IndexOutputFormat | undefined {
   return value === "json" || value === "table" ? value : undefined;
+}
+
+function parseSampleOutputFormat(value: string): SampleOutputFormat | undefined {
+  return value === "json" || value === "table" ? value : undefined;
+}
+
+function parseSampleLimit(value: string): number | undefined {
+  const limit = Number(value);
+
+  return Number.isInteger(limit) && limit > 0 ? limit : undefined;
 }
 
 function formatIndexResult(result: unknown, format: IndexOutputFormat): string {
@@ -108,4 +154,19 @@ function formatIndexResult(result: unknown, format: IndexOutputFormat): string {
   }
 
   return JSON.stringify(result, null, 2);
+}
+
+function formatSampleResult(result: SampleResult, format: SampleOutputFormat): string {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+
+  return [
+    `projectRoot: ${result.projectRoot}`,
+    `count: ${result.count}`,
+    ...result.symbols.map(
+      (symbol) =>
+        `${symbol.filePath}:${symbol.startLine} ${symbol.kind} ${symbol.qualifiedName} local=${symbol.isLocal} ${symbol.signature}`,
+    ),
+  ].join("\n");
 }
