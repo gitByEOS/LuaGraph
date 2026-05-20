@@ -17,7 +17,8 @@ pnpm link --global
 
 ```bash
 node dist/cli.js init <path>        # 代替 luagraph init
-node dist/cli.js status <path>      # 代替 luagraph status
+node dist/cli.js status             # 代替 luagraph status，默认当前目录
+node dist/cli.js status <path>      # 显式查看指定项目
 node dist/cli.js index <path>       # 代替 luagraph index
 ```
 
@@ -64,9 +65,10 @@ luagraph index /path/to/your/lua/project --force --format json
 
 ### 3. 查看状态
 
-查询 Kuzu 图数据库中已存储的 File、Symbol、关系数量：
+查询 Kuzu 图数据库中已存储的 File、Symbol、关系、解析错误、符号分类和待同步变化数量。无参数时默认使用当前目录：
 
 ```bash
+luagraph status
 luagraph status /path/to/your/lua/project
 luagraph status --project-root /path/to/your/lua/project
 ```
@@ -77,6 +79,13 @@ luagraph status --project-root /path/to/your/lua/project
   "fileCount": 18,
   "symbolCount": 42,
   "edgeCount": 42,
+  "parseErrorCount": 0,
+  "symbolKindCounts": {
+    "function": 10,
+    "method": 14,
+    "table": 18
+  },
+  "pendingSyncChangeCount": 0,
   "databaseDir": "/path/to/.luagraph/kuzu",
   "configPath": "/path/to/.luagraph/config.json",
   "schemaCount": 8
@@ -98,8 +107,9 @@ node dist/cli.js init /Users/bole/dev/mul-agents/LuaGraph
 # 索引
 node dist/cli.js index /Users/bole/dev/mul-agents/LuaGraph --force --format json
 
-# 验证
-node dist/cli.js status /Users/bole/dev/mul-agents/LuaGraph
+# 验证当前目录
+cd /Users/bole/dev/mul-agents/LuaGraph
+node /Users/bole/dev/mul-agents/LuaGraph/agents-hub/dist/cli.js status
 ```
 
 ## 验证
@@ -129,6 +139,7 @@ submit/test-agent-scanner.sh   # 扫描验收
 submit/test-agent-status.sh    # 状态验收
 submit/test-index.sh           # 索引验收
 submit/test-agent-verify.sh    # 完整验证（CLI 方式）
+submit/test-status-accuracy.sh # status 准确性验收
 ```
 
 ### 快速验证（最快）

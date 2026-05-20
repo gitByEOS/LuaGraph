@@ -33,18 +33,11 @@ export function createCli(): Command {
 
   program
     .command("status")
-    .argument("[project_root]", "项目根目录")
+    .argument("[project_root]", "项目根目录，默认当前目录")
     .option("--project-root <path>", "项目根目录")
     .description("统计 LuaGraph 项目状态")
     .action(async (projectRoot?: string, options?: { readonly projectRoot?: string }) => {
-      const targetProjectRoot = projectRoot ?? options?.projectRoot;
-
-      if (targetProjectRoot === undefined || targetProjectRoot.length === 0) {
-        program.error(
-          "请指定项目路径：luagraph status <project_root> 或 luagraph status --project-root <path>",
-        );
-        return;
-      }
+      const targetProjectRoot = projectRoot ?? options?.projectRoot ?? process.cwd();
 
       try {
         const result = await getProjectStatus(targetProjectRoot);

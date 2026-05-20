@@ -1,11 +1,13 @@
-import { stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
+import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
-import type { StatusResult } from "./types.js";
+import type { NormalizedPath, ScannedLuaFile, StatusResult } from "./types.js";
 
 export async function getProjectStatus(projectRoot: string): Promise<StatusResult> {
   const resolvedProjectRoot = resolve(projectRoot);
@@ -19,6 +21,7 @@ export async function getProjectStatus(projectRoot: string): Promise<StatusResul
 
   const databaseDir = resolve(resolvedProjectRoot, config.databaseDir);
   const databasePath = getKuzuDatabasePath(databaseDir);
+  const files = await scanLuaFiles(resolvedProjectRoot, config);
   const baseStatus = {
     databaseDir,
     configPath: join(resolvedProjectRoot, configPath),
@@ -31,6 +34,9 @@ export async function getProjectStatus(projectRoot: string): Promise<StatusResul
       fileCount: 0,
       symbolCount: 0,
       edgeCount: 0,
+      parseErrorCount: 0,
+      symbolKindCounts: {},
+      pendingSyncChangeCount: files.length,
     };
   }
 
@@ -50,12 +56,26 @@ export async function getProjectStatus(projectRoot: string): Promise<StatusResul
       connection,
       "MATCH ()-[edge]->() RETURN count(edge) AS count;",
     );
+    const parseErrorCount = await countQuery(
+      connection,
+      "MATCH (file:File) WHERE file.error <> '' RETURN count(file) AS count;",
+    );
+    const symbolKindCounts = await querySymbolKindCounts(connection);
+    const indexedFileHashes = await queryIndexedFileHashes(connection);
+    const pendingSyncChangeCount = await countPendingSyncChanges(
+      resolvedProjectRoot,
+      files,
+      indexedFileHashes,
+    );
 
     return {
       ...baseStatus,
       fileCount,
       symbolCount,
       edgeCount,
+      parseErrorCount,
+      symbolKindCounts,
+      pendingSyncChangeCount,
     };
   } finally {
     await connection.close();
@@ -64,6 +84,33 @@ export async function getProjectStatus(projectRoot: string): Promise<StatusResul
 }
 
 async function countQuery(connection: Connection, cypher: string): Promise<number> {
+  const rows = await queryRows(connection, cypher);
+
+  return toCount(rows[0]?.count ?? 0);
+}
+
+async function querySymbolKindCounts(connection: Connection): Promise<Record<string, number>> {
+  const rows = await queryRows(
+    connection,
+    "MATCH (symbol:Symbol) RETURN symbol.kind AS kind, count(symbol) AS count;",
+  );
+  const entries: [string, number][] = rows.map((row) => [String(row.kind), toCount(row.count)]);
+
+  return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
+}
+
+async function queryIndexedFileHashes(connection: Connection): Promise<Map<NormalizedPath, string>> {
+  const rows = await queryRows(
+    connection,
+    "MATCH (file:File) RETURN file.path AS path, file.contentHash AS contentHash;",
+  );
+
+  return new Map(
+    rows.map((row) => [String(row.path) as NormalizedPath, String(row.contentHash)]),
+  );
+}
+
+async function queryRows(connection: Connection, cypher: string): Promise<Record<string, unknown>[]> {
   let result: QueryResult | QueryResult[] | undefined;
 
   try {
@@ -73,17 +120,51 @@ async function countQuery(connection: Connection, cypher: string): Promise<numbe
       throw new Error("状态查询未返回结果");
     }
 
-    const rows = await queryResult.getAll();
-    return toCount(rows[0]?.count);
+    return (await queryResult.getAll()) as Record<string, unknown>[];
   } catch (error) {
     if (isMissingSchemaError(error)) {
-      return 0;
+      return [];
     }
 
     throw error;
   } finally {
     closeQueryResult(result);
   }
+}
+
+async function countPendingSyncChanges(
+  projectRoot: string,
+  files: readonly ScannedLuaFile[],
+  indexedFileHashes: ReadonlyMap<NormalizedPath, string>,
+): Promise<number> {
+  const currentFileHashes = await createCurrentFileHashes(projectRoot, files);
+  const addedOrModifiedCount = [...currentFileHashes].filter(
+    ([path, contentHash]) => indexedFileHashes.get(path) !== contentHash,
+  ).length;
+  const deletedCount = [...indexedFileHashes.keys()].filter(
+    (path) => !currentFileHashes.has(path),
+  ).length;
+
+  return addedOrModifiedCount + deletedCount;
+}
+
+async function createCurrentFileHashes(
+  projectRoot: string,
+  files: readonly ScannedLuaFile[],
+): Promise<Map<NormalizedPath, string>> {
+  const entries = await Promise.all(
+    files.map(async (file) => {
+      const content = await readFile(join(projectRoot, file.path), "utf8");
+
+      return [file.path, createContentHash(content)] as const;
+    }),
+  );
+
+  return new Map(entries);
+}
+
+function createContentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function toCount(value: unknown): number {

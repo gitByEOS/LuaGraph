@@ -28,7 +28,7 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library，用于扫描、解析 Lua 项
 - `src/store.ts`：Kuzu schema 入口，定义 File/Symbol 节点和关系。
 - `src/scanner.ts`：按配置扫描 Lua 文件并返回仓库相对路径。
 - `src/parser.ts`：Phase 1 Lua 符号最小提取，输出 File 与 Symbol 结构。
-- `src/status.ts`：读取项目配置和 Kuzu 库，统计 File、Symbol 与关系数量。
+- `src/status.ts`：读取项目配置和 Kuzu 库，统计 File、Symbol、关系、解析错误、符号分类与待同步变化数量。
 - `src/init.ts`：初始化流程编排入口。
 - `test/`：测试。
 
@@ -43,9 +43,10 @@ LuaGraph v0.1.0 是一个 TypeScript CLI/library，用于扫描、解析 Lua 项
 | Scanner   | `submit/test-agent-scanner.sh`   | `vp test test/scanner.test.ts && vp check`                                                                                      |
 | Parser    | `submit/test-agent-parser.sh`    | `vp test test/parser.test.ts && vp check`                                                                                       |
 | Init-real | `submit/test-agent-init-real.sh` | `vp install && vp test && vp check && vp run build`，然后 `node dist/cli.js init <tmp>` 验证 `.luagraph/` 创建                  |
-| Status    | `submit/test-agent-status.sh`    | `vp test test/status.test.ts && vp check && vp run build`，CLI 支持 `luagraph status <project_root>` 和 `--project-root <path>` |
+| Status    | `submit/test-agent-status.sh`    | `vp test test/status.test.ts && vp check && vp run build`，CLI 支持 `luagraph status` 默认当前目录、显式路径和 `--project-root <path>` |
 | Index     | `submit/test-index.sh`           | `npm run typecheck && npx vitest run && npm run build`，CLI `init` + `index` 写入 Kuzu |
 | Verify    | `submit/test-agent-verify.sh`    | CLI + `test/verify.test.ts`，index 后 status 输出非零计数                              |
+| Status Accuracy | `submit/test-status-accuracy.sh` | `npm run typecheck && npx vitest run && npm run build`，CLI 临时项目无参 `status` 验证符号分类、解析错误和待同步变化 |
 
 ## Systems/ 分析（已完成 ✅）
 

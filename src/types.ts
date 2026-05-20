@@ -61,6 +61,9 @@ export type StatusResult = {
   readonly fileCount: number;
   readonly symbolCount: number;
   readonly edgeCount: number;
+  readonly parseErrorCount: number;
+  readonly symbolKindCounts: Record<string, number>;
+  readonly pendingSyncChangeCount: number;
   readonly databaseDir: string;
   readonly configPath: string;
   readonly schemaCount: number;

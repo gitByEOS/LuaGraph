@@ -45,7 +45,7 @@ export async function indexProject(
       const content = await readFile(nodePath.join(resolvedProjectRoot, file.path), "utf8");
       const parsed = parseLuaFile(file.path, content);
 
-      await insertFile(connection, file, content);
+      await insertFile(connection, file, content, parsed.symbols.length);
 
       for (const symbol of parsed.symbols) {
         await insertSymbol(connection, symbol);
@@ -78,6 +78,7 @@ async function insertFile(
   connection: Connection,
   file: ScannedLuaFile,
   content: string,
+  nodeCount: number,
 ): Promise<void> {
   const contentHash = createHash("sha256").update(content).digest("hex");
   const now = new Date();
@@ -92,7 +93,7 @@ async function insertFile(
       size: BigInt(file.size),
       modifiedAt: file.modifiedAt,
       indexedAt: now,
-      nodeCount: BigInt(0),
+      nodeCount: BigInt(nodeCount),
       error: "",
     }),
   );

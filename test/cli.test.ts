@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -51,14 +51,6 @@ describe("luagraph status CLI", () => {
     );
   });
 
-  it("缺少项目路径时提示用法", async () => {
-    const cli = createTestCli();
-
-    await expect(cli.parseAsync(["node", "luagraph", "status"], { from: "node" })).rejects.toThrow(
-      "请指定项目路径：luagraph status <project_root> 或 luagraph status --project-root <path>",
-    );
-  });
-
   it("支持 --project-root 输出状态结果", async () => {
     const projectRoot = await createTempProject();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -77,12 +69,49 @@ describe("luagraph status CLI", () => {
       fileCount: 0,
       symbolCount: 0,
       edgeCount: 0,
+      parseErrorCount: 0,
+      symbolKindCounts: {},
+      pendingSyncChangeCount: 0,
       configPath: join(projectRoot, ".luagraph/config.json"),
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
       schemaCount: 8,
     });
 
     log.mockRestore();
+  });
+
+  it("无参数时默认使用当前目录", async () => {
+    const projectRoot = await createTempProject();
+    const previousCwd = process.cwd();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const cli = createTestCli();
+
+    try {
+      await cli.parseAsync(["node", "luagraph", "init", projectRoot], { from: "node" });
+      log.mockClear();
+      process.chdir(projectRoot);
+      const resolvedProjectRoot = await realpath(projectRoot);
+
+      await cli.parseAsync(["node", "luagraph", "status"], { from: "node" });
+
+      expect(log).toHaveBeenCalledTimes(1);
+      const output = log.mock.calls[0]?.[0];
+      expect(typeof output).toBe("string");
+      expect(JSON.parse(output as string)).toMatchObject({
+        fileCount: 0,
+        symbolCount: 0,
+        edgeCount: 0,
+        parseErrorCount: 0,
+        symbolKindCounts: {},
+        pendingSyncChangeCount: 0,
+        configPath: join(resolvedProjectRoot, ".luagraph/config.json"),
+        databaseDir: join(resolvedProjectRoot, ".luagraph/kuzu"),
+        schemaCount: 8,
+      });
+    } finally {
+      process.chdir(previousCwd);
+      log.mockRestore();
+    }
   });
 });
 
