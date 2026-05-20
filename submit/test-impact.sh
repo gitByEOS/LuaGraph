@@ -71,18 +71,9 @@ const impactDepthJson = JSON.parse(process.argv[6]);
 const impactTree = process.argv[7];
 
 const names = (result) => result.nodes.map((node) => node.qualifiedName);
-
-if (
-  JSON.stringify(names(queryJson)) !== JSON.stringify(["middle", "appBoot"]) ||
-  !queryTable.includes("src/api.lua:3 function middle") ||
-  !queryTree.includes("  src/api.lua:3 function middle") ||
-  JSON.stringify(names(impactJson)) !== JSON.stringify(["middle", "appBoot"]) ||
-  JSON.stringify(impactJson.files) !== JSON.stringify(["src/api.lua", "src/app.lua"]) ||
-  JSON.stringify(names(impactFileJson)) !== JSON.stringify(["appBoot", "root"]) ||
-  JSON.stringify(names(impactDepthJson)) !== JSON.stringify(["middle"]) ||
-  !impactTree.includes("impact:leaf depth=2")
-) {
-  console.error(`impact 验收失败: ${JSON.stringify({
+const fail = (reason) => {
+  console.error(`impact 验收失败: ${reason}`);
+  console.error(JSON.stringify({
     queryJson,
     queryTable,
     queryTree,
@@ -90,8 +81,31 @@ if (
     impactFileJson,
     impactDepthJson,
     impactTree,
-  })}`);
+  }));
   process.exit(1);
+};
+const assertIncludes = (content, expected) => {
+  if (!content.includes(expected)) {
+    fail(`缺少输出片段: ${JSON.stringify(expected)}`);
+  }
+};
+
+assertIncludes(queryTable, "expression\tcallers:leaf");
+assertIncludes(queryTable, "count\t2");
+assertIncludes(queryTable, "type\tkind\tpath/filePath\tline\tqualifiedName\tsignature");
+assertIncludes(queryTable, "Symbol\tfunction\tsrc/api.lua\t3\tmiddle\tfunction middle()");
+assertIncludes(queryTable, "Symbol\tfunction\tsrc/app.lua\t1\tappBoot\tfunction appBoot()");
+
+if (
+  JSON.stringify(names(queryJson)) !== JSON.stringify(["middle", "appBoot"]) ||
+  !queryTree.includes("  src/api.lua:3 function middle") ||
+  JSON.stringify(names(impactJson)) !== JSON.stringify(["middle", "appBoot"]) ||
+  JSON.stringify(impactJson.files) !== JSON.stringify(["src/api.lua", "src/app.lua"]) ||
+  JSON.stringify(names(impactFileJson)) !== JSON.stringify(["appBoot", "root"]) ||
+  JSON.stringify(names(impactDepthJson)) !== JSON.stringify(["middle"]) ||
+  !impactTree.includes("impact:leaf depth=2")
+) {
+  fail("JSON 或 tree 输出不符合预期");
 }
 ' "$QUERY_JSON" "$QUERY_TABLE" "$QUERY_TREE" "$IMPACT_JSON" "$IMPACT_FILE_JSON" "$IMPACT_DEPTH_JSON" "$IMPACT_TREE"
 
