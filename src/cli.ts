@@ -4,9 +4,11 @@ import { pathToFileURL } from "node:url";
 
 import { Command } from "commander";
 
+import { openUrl } from "./browser.js";
 import { indexProject } from "./indexer.js";
 import { initializeProject } from "./init.js";
 import { sampleProject } from "./sample.js";
+import { startServer } from "./server.js";
 import { getProjectStatus } from "./status.js";
 import type { SampleResult } from "./types.js";
 
@@ -78,6 +80,32 @@ export function createCli(): Command {
     });
 
   program
+    .command("serve")
+    .argument("[project_root]", "项目根目录，默认当前目录")
+    .option("--port <port>", "HTTP 端口，默认随机可用端口", "0")
+    .option("--open", "启动后用系统默认浏览器打开")
+    .description("启动 LuaGraph 本地可视化服务")
+    .action(async (projectRoot?: string, options?: ServeCommandOptions) => {
+      const port = parseServePort(options?.port ?? "0");
+
+      if (port === undefined) {
+        program.error("serve --port 必须是 0 到 65535 的整数");
+        return;
+      }
+
+      try {
+        const server = await startServer(projectRoot ?? process.cwd(), { port });
+        console.log(`LuaGraph serve listening on ${server.url}`);
+
+        if (options?.open === true) {
+          await openUrl(server.url);
+        }
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+  program
     .command("index")
     .argument("[project_root]", "项目根目录，默认当前目录")
     .option("--force", "强制重建索引")
@@ -131,6 +159,11 @@ type SampleCommandOptions = {
   readonly format?: string;
 };
 
+type ServeCommandOptions = {
+  readonly port?: string;
+  readonly open?: boolean;
+};
+
 type IndexOutputFormat = "json" | "table";
 type SampleOutputFormat = "json" | "table";
 
@@ -146,6 +179,12 @@ function parseSampleLimit(value: string): number | undefined {
   const limit = Number(value);
 
   return Number.isInteger(limit) && limit > 0 ? limit : undefined;
+}
+
+function parseServePort(value: string): number | undefined {
+  const port = Number(value);
+
+  return Number.isInteger(port) && port >= 0 && port <= 65535 ? port : undefined;
 }
 
 function formatIndexResult(result: unknown, format: IndexOutputFormat): string {

@@ -22,6 +22,7 @@ node dist/cli.js status <path>      # 显式查看指定项目
 node dist/cli.js index <path>       # 代替 luagraph index
 node dist/cli.js sample             # 代替 luagraph sample，默认当前目录
 node dist/cli.js sample <path>      # index 后抽查指定项目
+node dist/cli.js serve <path>       # 启动本地可视化服务
 ```
 
 ## 使用方式
@@ -123,7 +124,34 @@ luagraph status --project-root /path/to/your/lua/project
 }
 ```
 
-### 5. 完整工作流示例
+### 5. 启动本地可视化
+
+`serve` 会启动内置 HTTP 服务，读取已索引的 Kuzu 图数据库并提供静态 Web UI：
+
+```bash
+luagraph serve
+luagraph serve /path/to/your/lua/project
+luagraph serve /path/to/your/lua/project --port 43210
+luagraph serve /path/to/your/lua/project --open
+```
+
+不传 `--port` 时默认使用随机可用端口，并在终端输出实际 URL。未全局安装时：
+
+```bash
+node dist/cli.js serve /path/to/your/lua/project --port 43210 --open
+```
+
+第一版能力：
+- 展示 File、Symbol 节点和 Contains 关系。
+- 搜索命中节点高亮，并保留相邻节点帮助定位结构。
+- 点击 Symbol 节点后通过 `/api/code` 读取源码片段。
+
+当前限制：
+- 需要先执行 `init` 和 `index`，不会自动创建或刷新索引。
+- 暂不展示 Calls、Requires、Extends 关系。
+- 不提供前端构建链，不监听文件变化。
+
+### 6. 完整工作流示例
 
 ```bash
 # 进入 LuaGraph 项目根
@@ -141,6 +169,9 @@ node dist/cli.js index . --force --format json
 # 验证当前目录
 node dist/cli.js sample
 node dist/cli.js status
+
+# 查看可视化
+node dist/cli.js serve . --open
 ```
 
 ## 验证
@@ -173,6 +204,7 @@ submit/test-index.sh           # 索引验收
 submit/test-agent-verify.sh    # 完整验证（CLI 方式）
 submit/test-status-accuracy.sh # status 准确性验收
 submit/test-sample.sh          # sample 抽查验收
+submit/test-serve.sh           # serve API 和静态 UI 验收
 ```
 
 ### 快速验证（最快）

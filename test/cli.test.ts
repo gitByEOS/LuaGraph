@@ -220,6 +220,23 @@ describe("luagraph sample CLI", () => {
   });
 });
 
+describe("luagraph serve CLI", () => {
+  it("help 包含 serve 命令", () => {
+    const cli = createTestCli();
+    const helpText = cli.helpInformation();
+
+    expect(helpText).toContain("serve");
+  });
+
+  it("拒绝非法端口", async () => {
+    const cli = createTestCli();
+
+    await expect(
+      cli.parseAsync(["node", "luagraph", "serve", "--port", "abc"], { from: "node" }),
+    ).rejects.toThrow("serve --port 必须是 0 到 65535 的整数");
+  });
+});
+
 function createTestCli() {
   return createCli().exitOverride();
 }
