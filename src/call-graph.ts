@@ -38,7 +38,7 @@ async function insertCallsRelationships(
   files: readonly ParsedCallGraphFile[],
 ): Promise<number> {
   const symbols = files.flatMap((file) => [...file.symbols]);
-  const uniqueSymbols = createUniqueSymbolMap(symbols);
+  const symbolIndex = createSymbolIndex(symbols);
   const statement = await connection.prepare(
     "MATCH (source:Symbol {id: $sourceId}), (target:Symbol {id: $targetId}) CREATE (source)-[r:Calls]->(target) SET r.line = $line, r.`column` = $callColumn, r.isResolved = $isResolved",
   );
@@ -47,7 +47,7 @@ async function insertCallsRelationships(
   for (const file of files) {
     for (const call of file.calls) {
       const source = findCallerSymbol(file.symbols, call);
-      const target = uniqueSymbols.get(call.calleeQualifiedName);
+      const target = resolveCallTarget(file, call, symbolIndex);
 
       if (source === undefined || target === undefined) {
         continue;
@@ -69,7 +69,19 @@ async function insertCallsRelationships(
   return callsCount;
 }
 
-function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): Map<string, LuaSymbol> {
+type SymbolIndex = {
+  readonly uniqueSymbols: ReadonlyMap<string, LuaSymbol>;
+  readonly classesByName: ReadonlyMap<string, readonly LuaSymbol[]>;
+};
+
+function createSymbolIndex(symbols: readonly LuaSymbol[]): SymbolIndex {
+  return {
+    uniqueSymbols: createUniqueSymbolMap(symbols),
+    classesByName: createClassesByNameMap(symbols),
+  };
+}
+
+function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): ReadonlyMap<string, LuaSymbol> {
   const groups = new Map<string, LuaSymbol[]>();
 
   for (const symbol of symbols) {
@@ -81,6 +93,61 @@ function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): Map<string, LuaSy
       .filter((entry): entry is [string, [LuaSymbol]] => entry[1].length === 1)
       .map(([qualifiedName, [symbol]]) => [qualifiedName, symbol]),
   );
+}
+
+function createClassesByNameMap(symbols: readonly LuaSymbol[]): ReadonlyMap<string, readonly LuaSymbol[]> {
+  const groups = new Map<string, LuaSymbol[]>();
+
+  for (const symbol of symbols) {
+    if (symbol.kind !== "class") {
+      continue;
+    }
+
+    groups.set(symbol.qualifiedName, [...(groups.get(symbol.qualifiedName) ?? []), symbol]);
+  }
+
+  return groups;
+}
+
+function resolveCallTarget(
+  file: ParsedCallGraphFile,
+  call: LuaCall,
+  symbolIndex: SymbolIndex,
+): LuaSymbol | undefined {
+  const constructorTarget = resolveConstructorTarget(file, call, symbolIndex);
+
+  return constructorTarget ?? symbolIndex.uniqueSymbols.get(call.calleeQualifiedName);
+}
+
+function resolveConstructorTarget(
+  file: ParsedCallGraphFile,
+  call: LuaCall,
+  symbolIndex: SymbolIndex,
+): LuaSymbol | undefined {
+  const className = getConstructorClassName(call.calleeQualifiedName);
+
+  if (className === undefined) {
+    return undefined;
+  }
+
+  const localClass = findSingleClass(file.symbols, className);
+  if (localClass !== undefined) {
+    return localClass;
+  }
+
+  return findSingleClass(symbolIndex.classesByName.get(className) ?? [], className);
+}
+
+function getConstructorClassName(calleeQualifiedName: string): string | undefined {
+  const match = /^(?<className>[A-Za-z_][A-Za-z0-9_]*)\.new$/.exec(calleeQualifiedName);
+
+  return match?.groups?.className;
+}
+
+function findSingleClass(symbols: readonly LuaSymbol[], className: string): LuaSymbol | undefined {
+  const classes = symbols.filter((symbol) => symbol.kind === "class" && symbol.qualifiedName === className);
+
+  return classes.length === 1 ? classes[0] : undefined;
 }
 
 function findCallerSymbol(symbols: readonly LuaSymbol[], call: LuaCall): LuaSymbol | undefined {

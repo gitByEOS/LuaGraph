@@ -57,6 +57,104 @@ describe("impactProject", () => {
     expect(result.nodes.map((node) => node.qualifiedName)).toEqual(["cycleB"]);
     expect(result.edges.map((edge) => [edge.source, edge.target])).toHaveLength(1);
   });
+
+  it("同文件 Player.new 构造调用连到 class Player", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(
+      projectRoot,
+      "src/player.lua",
+      [
+        'Player = class("Player")',
+        "function createPlayer()",
+        "  return Player.new()",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "Player");
+
+    expect(result.seeds.map((seed) => seed.qualifiedName)).toEqual(["Player"]);
+    expect(result.nodes.map((node) => node.qualifiedName)).toEqual(["createPlayer"]);
+    expect(result.edges).toHaveLength(1);
+  });
+
+  it("跨文件唯一 class 可接收 X.new 构造调用", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "src/player.lua", 'Player = class("Player")');
+    await writeLuaFile(
+      projectRoot,
+      "src/factory.lua",
+      ["function createPlayer()", "  return Player.new()", "end"].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "Player");
+
+    expect(result.nodes.map((node) => node.qualifiedName)).toEqual(["createPlayer"]);
+    expect(result.edges).toHaveLength(1);
+  });
+
+  it("跨文件同名 class 且调用文件没有本地 class 时不连边", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "src/skin/player.lua", 'Player = class("Player")');
+    await writeLuaFile(projectRoot, "src/game/player.lua", 'Player = class("Player")');
+    await writeLuaFile(
+      projectRoot,
+      "src/factory.lua",
+      ["function createPlayer()", "  return Player.new()", "end"].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "Player");
+
+    expect(result.seeds.map((seed) => seed.qualifiedName)).toEqual(["Player", "Player"]);
+    expect(result.nodes).toEqual([]);
+    expect(result.edges).toEqual([]);
+  });
+
+  it("Systems 风格同名 class 优先连接同文件构造调用", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(
+      projectRoot,
+      "src/first/theme_collect_dialog.lua",
+      [
+        'ThemeCollectDialog = class("ThemeCollectDialog" , CCSNode)',
+        "function createFirstDialog()",
+        "  local dialog = ThemeCollectDialog.new(self.ctl, callback)",
+        "  return dialog",
+        "end",
+      ].join("\n"),
+    );
+    await writeLuaFile(
+      projectRoot,
+      "src/second/theme_collect_dialog.lua",
+      [
+        'ThemeCollectDialog = class("ThemeCollectDialog" , CCSNode)',
+        "function createSecondDialog()",
+        "  local dialog = ThemeCollectDialog.new(self.ctl, callback)",
+        "  return dialog",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "ThemeCollectDialog");
+
+    expect(result.seeds.map((seed) => seed.qualifiedName)).toEqual([
+      "ThemeCollectDialog",
+      "ThemeCollectDialog",
+    ]);
+    expect(result.nodes.map((node) => node.qualifiedName)).toEqual([
+      "createFirstDialog",
+      "createSecondDialog",
+    ]);
+    expect(result.edges).toHaveLength(2);
+  });
 });
 
 async function createIndexedProject(): Promise<string> {
