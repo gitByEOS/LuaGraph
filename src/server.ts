@@ -106,7 +106,11 @@ async function readCodeApi(projectRoot: string, url: URL): Promise<unknown> {
   }
 
   try {
-    return await readCodeSnippet(projectRoot, createCodeRequest(url, path));
+    return await readCodeSnippet(projectRoot, {
+      path,
+      line: readRequiredLine(url, "line"),
+      context: readContext(url),
+    });
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "读取代码失败");
   }
@@ -262,7 +266,15 @@ function readWebAssetPath(path: string): string | undefined {
     return "app.js";
   }
 
+  if (path === "/app.js") {
+    return "app.js";
+  }
+
   if (path === "/web/style.css") {
+    return "style.css";
+  }
+
+  if (path === "/style.css") {
     return "style.css";
   }
 
@@ -281,30 +293,11 @@ function readContentType(path: string): string {
   return "text/html; charset=utf-8";
 }
 
-function createCodeRequest(
-  url: URL,
-  path: string,
-): { readonly path: string; readonly startLine?: number; readonly endLine?: number } {
-  const request: { path: string; startLine?: number; endLine?: number } = { path };
-  const startLine = readOptionalLine(url, "startLine");
-  const endLine = readOptionalLine(url, "endLine");
-
-  if (startLine !== undefined) {
-    request.startLine = startLine;
-  }
-
-  if (endLine !== undefined) {
-    request.endLine = endLine;
-  }
-
-  return request;
-}
-
-function readOptionalLine(url: URL, name: "startLine" | "endLine"): number | undefined {
+function readRequiredLine(url: URL, name: "line"): number {
   const value = url.searchParams.get(name);
 
   if (value === null) {
-    return undefined;
+    throw new HttpError(400, `缺少 ${name} 参数`);
   }
 
   const line = Number(value);
@@ -313,6 +306,21 @@ function readOptionalLine(url: URL, name: "startLine" | "endLine"): number | und
   }
 
   return line;
+}
+
+function readContext(url: URL): number {
+  const value = url.searchParams.get("context");
+
+  if (value === null) {
+    return 0;
+  }
+
+  const context = Number(value);
+  if (!Number.isInteger(context)) {
+    throw new HttpError(400, "context 必须是整数");
+  }
+
+  return context;
 }
 
 function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {

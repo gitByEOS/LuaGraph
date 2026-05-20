@@ -4,8 +4,8 @@ import { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./path.js";
 
 export type CodeSnippetRequest = {
   readonly path: string;
-  readonly startLine?: number;
-  readonly endLine?: number;
+  readonly line: number;
+  readonly context: number;
 };
 
 export type CodeSnippetResult = {
@@ -37,23 +37,16 @@ function readLineRange(
   request: CodeSnippetRequest,
   lineCount: number,
 ): { readonly startLine: number; readonly endLine: number } {
-  const startLine = request.startLine ?? 1;
-  const endLine = request.endLine ?? lineCount;
+  assertPositiveInteger(request.line, "line");
+  assertNonNegativeInteger(request.context, "context");
 
-  assertPositiveInteger(startLine, "startLine");
-  assertPositiveInteger(endLine, "endLine");
-
-  if (endLine < startLine) {
-    throw new Error("endLine 不能小于 startLine");
-  }
-
-  if (startLine > lineCount) {
-    throw new Error("startLine 超出文件行数");
+  if (request.line > lineCount) {
+    throw new Error("line 超出文件行数");
   }
 
   return {
-    startLine,
-    endLine: Math.min(endLine, lineCount),
+    startLine: Math.max(1, request.line - request.context),
+    endLine: Math.min(lineCount, request.line + request.context),
   };
 }
 
@@ -70,5 +63,11 @@ function splitLines(content: string): string[] {
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`${name} 必须是正整数`);
+  }
+}
+
+function assertNonNegativeInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} 必须是非负整数`);
   }
 }

@@ -68,12 +68,12 @@ describe("serve API", () => {
     );
   });
 
-  it("安全读取项目内代码片段", async () => {
+  it("按 line/context=0 读取目标行", async () => {
     const projectRoot = await createIndexedProject();
     const server = await createTestServer(projectRoot);
 
     const response = await fetchJson(
-      `${server.url}/api/code?path=src/player.lua&startLine=2&endLine=3`,
+      `${server.url}/api/code?path=src/player.lua&line=2&context=0`,
     );
 
     expect(response).toEqual({
@@ -81,8 +81,27 @@ describe("serve API", () => {
       body: {
         path: "src/player.lua",
         startLine: 2,
+        endLine: 2,
+        code: "function Player:move()",
+      },
+    });
+  });
+
+  it("按 line/context=1 读取上下文", async () => {
+    const projectRoot = await createIndexedProject();
+    const server = await createTestServer(projectRoot);
+
+    const response = await fetchJson(
+      `${server.url}/api/code?path=src/player.lua&line=2&context=1`,
+    );
+
+    expect(response).toEqual({
+      status: 200,
+      body: {
+        path: "src/player.lua",
+        startLine: 1,
         endLine: 3,
-        code: "function Player:move()\nend",
+        code: 'Player = class("Player")\nfunction Player:move()\nend',
       },
     });
   });
@@ -92,7 +111,7 @@ describe("serve API", () => {
     const server = await createTestServer(projectRoot);
     const absolutePath = encodeURIComponent(join(projectRoot, "src/player.lua"));
 
-    const response = await fetchJson(`${server.url}/api/code?path=${absolutePath}`);
+    const response = await fetchJson(`${server.url}/api/code?path=${absolutePath}&line=1&context=0`);
 
     expect(response.status).toBe(400);
     expect(response.body.error).toContain("相对路径");
@@ -102,7 +121,7 @@ describe("serve API", () => {
     const projectRoot = await createIndexedProject();
     const server = await createTestServer(projectRoot);
 
-    const response = await fetchJson(`${server.url}/api/code?path=../secret.lua`);
+    const response = await fetchJson(`${server.url}/api/code?path=../secret.lua&line=1&context=0`);
 
     expect(response.status).toBe(400);
     expect(response.body.error).toContain("..");
@@ -115,6 +134,20 @@ describe("serve API", () => {
     const response = await fetchJson(`${server.url}/missing.js`);
 
     expect(response.status).toBe(404);
+  });
+
+  it("服务 UI 主入口静态资源", async () => {
+    const projectRoot = await createIndexedProject();
+    const server = await createTestServer(projectRoot);
+
+    await expect(fetchText(`${server.url}/app.js`)).resolves.toMatchObject({
+      status: 200,
+      body: expect.stringContaining("LuaGraph"),
+    });
+    await expect(fetchText(`${server.url}/style.css`)).resolves.toMatchObject({
+      status: 200,
+      body: expect.stringContaining("font-family"),
+    });
   });
 });
 
@@ -157,5 +190,14 @@ async function fetchJson(url: string): Promise<{ readonly status: number; readon
   return {
     status: response.status,
     body: await response.json(),
+  };
+}
+
+async function fetchText(url: string): Promise<{ readonly status: number; readonly body: string }> {
+  const response = await fetch(url);
+
+  return {
+    status: response.status,
+    body: await response.text(),
   };
 }
