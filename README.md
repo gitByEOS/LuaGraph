@@ -52,3 +52,17 @@ submit/test-agent-config.sh
 vp test test/config.test.ts
 vp check
 ```
+
+Store 模块验收：
+
+```bash
+submit/test-agent-store.sh
+```
+
+`submit/test-agent-store.sh` 会从自身位置定位项目根，并依次执行：
+
+```bash
+vp install
+vp test test/store.test.ts
+vp check
+```
