@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { pathToFileURL } from "node:url";
+
 import { Command } from "commander";
 
 import { createInitPlan } from "./init.js";
@@ -16,6 +18,7 @@ export function createCli(): Command {
     .action((projectRoot?: string) => {
       if (projectRoot === undefined || projectRoot.length === 0) {
         program.error("请指定项目路径：luagraph init <project_root>");
+        return;
       }
 
       const plan = createInitPlan(projectRoot);
@@ -25,4 +28,12 @@ export function createCli(): Command {
   return program;
 }
 
-createCli().parse();
+if (isCliEntrypoint()) {
+  createCli().parse();
+}
+
+function isCliEntrypoint(): boolean {
+  const entrypoint = process.argv[1];
+
+  return entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href;
+}
