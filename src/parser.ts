@@ -6,10 +6,16 @@ type SymbolDraft = {
   readonly name: string;
   readonly qualifiedName: string;
   readonly startLine: number;
+  readonly endLine: number;
   readonly startColumn: number;
   readonly endColumn: number;
   readonly signature: string;
   readonly isLocal: boolean;
+};
+
+type FunctionScope = {
+  readonly draft: SymbolDraft;
+  readonly closeDepth: number;
 };
 
 const classPattern =
@@ -32,9 +38,35 @@ export function parseLuaFile(pathValue: string, source: string): LuaFile {
 
 export function extractLuaSymbols(filePath: NormalizedPath, source: string): readonly LuaSymbol[] {
   const lines = source.split(/\r\n|\n|\r/);
-  const drafts = lines.flatMap((line, index) => parseLine(line, index + 1));
+  const drafts = extractSymbolDrafts(lines);
 
   return drafts.map((draft) => createSymbol(filePath, draft));
+}
+
+function extractSymbolDrafts(lines: readonly string[]): readonly SymbolDraft[] {
+  const drafts: SymbolDraft[] = [];
+  const functionScopes: FunctionScope[] = [];
+  let blockDepth = 0;
+
+  for (const [index, line] of lines.entries()) {
+    const lineNumber = index + 1;
+    const lineDrafts = parseLine(line, lineNumber);
+
+    for (const draft of lineDrafts) {
+      if (isFunctionDraft(draft)) {
+        functionScopes.push({ draft, closeDepth: blockDepth });
+      } else {
+        drafts.push(draft);
+      }
+    }
+
+    blockDepth = Math.max(0, blockDepth + getLuaBlockDelta(line));
+    closeResolvedFunctions(functionScopes, drafts, blockDepth, lineNumber, line.length);
+  }
+
+  closeOpenFunctionsAtFileEnd(functionScopes, drafts, lines);
+
+  return drafts.sort((left, right) => left.startLine - right.startLine || left.startColumn - right.startColumn);
 }
 
 function parseLine(line: string, lineNumber: number): readonly SymbolDraft[] {
@@ -72,6 +104,7 @@ function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefin
     name,
     qualifiedName: name,
     startLine: lineNumber,
+    endLine: lineNumber,
     startColumn: getDeclarationColumn(match.groups.indent),
     endColumn: line.length,
     signature: line.trim(),
@@ -100,6 +133,7 @@ function parseTableLine(line: string, lineNumber: number): SymbolDraft | undefin
     name,
     qualifiedName: name,
     startLine: lineNumber,
+    endLine: lineNumber,
     startColumn: getDeclarationColumn(match.groups.indent),
     endColumn: line.length,
     signature: line.trim(),
@@ -125,6 +159,7 @@ function parseFunctionLine(line: string, lineNumber: number): SymbolDraft | unde
     name: getSymbolName(qualifiedName),
     qualifiedName,
     startLine: lineNumber,
+    endLine: lineNumber,
     startColumn: getDeclarationColumn(match.groups.indent),
     endColumn: line.length,
     signature: line.trim(),
@@ -142,7 +177,7 @@ function createSymbol(filePath: NormalizedPath, draft: SymbolDraft): LuaSymbol {
     filePath,
     startLine: draft.startLine,
     startColumn: draft.startColumn,
-    endLine: draft.startLine,
+    endLine: draft.endLine,
     endColumn: draft.endColumn,
     signature: draft.signature,
     isLocal: draft.isLocal,
@@ -156,10 +191,123 @@ function getDeclarationColumn(indent: string | undefined): number {
 }
 
 function getFunctionKind(qualifiedName: string): SymbolKind {
-  return qualifiedName.includes(":") ? "method" : "function";
+  return /[.:]/.test(qualifiedName) ? "method" : "function";
 }
 
 function getSymbolName(qualifiedName: string): string {
   const segments = qualifiedName.split(/[.:]/);
   return segments[segments.length - 1] ?? qualifiedName;
+}
+
+function isFunctionDraft(draft: SymbolDraft): boolean {
+  return draft.kind === "function" || draft.kind === "method";
+}
+
+function closeResolvedFunctions(
+  functionScopes: FunctionScope[],
+  drafts: SymbolDraft[],
+  blockDepth: number,
+  lineNumber: number,
+  endColumn: number,
+): void {
+  while (functionScopes.length > 0) {
+    const current = functionScopes[functionScopes.length - 1];
+
+    if (current === undefined || blockDepth > current.closeDepth) {
+      return;
+    }
+
+    functionScopes.pop();
+    drafts.push(closeFunctionDraft(current.draft, lineNumber, endColumn));
+  }
+}
+
+function closeOpenFunctionsAtFileEnd(
+  functionScopes: FunctionScope[],
+  drafts: SymbolDraft[],
+  lines: readonly string[],
+): void {
+  const endLine = Math.max(1, lines.length);
+  const endColumn = lines[endLine - 1]?.length ?? 0;
+
+  while (functionScopes.length > 0) {
+    const current = functionScopes.pop();
+
+    if (current !== undefined) {
+      drafts.push(closeFunctionDraft(current.draft, endLine, endColumn));
+    }
+  }
+}
+
+function closeFunctionDraft(draft: SymbolDraft, endLine: number, endColumn: number): SymbolDraft {
+  return {
+    ...draft,
+    endLine,
+    endColumn,
+  };
+}
+
+function getLuaBlockDelta(line: string): number {
+  const tokens = getLuaTokens(line);
+  let openCount = 0;
+  let closeCount = 0;
+
+  for (const [index, token] of tokens.entries()) {
+    const previousToken = tokens[index - 1];
+
+    if (token === "function" || token === "repeat" || token === "do") {
+      openCount += 1;
+    }
+
+    if (token === "then" && previousToken !== "elseif") {
+      openCount += 1;
+    }
+
+    if (token === "end" || token === "until") {
+      closeCount += 1;
+    }
+  }
+
+  return openCount - closeCount;
+}
+
+function getLuaTokens(line: string): readonly string[] {
+  return stripLuaLine(line).match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+}
+
+function stripLuaLine(line: string): string {
+  let stripped = "";
+  let quote: string | undefined;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (quote !== undefined) {
+      stripped += " ";
+
+      if (char === "\\") {
+        index += 1;
+        stripped += " ";
+      } else if (char === quote) {
+        quote = undefined;
+      }
+
+      continue;
+    }
+
+    if (char === "-" && nextChar === "-") {
+      break;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      stripped += " ";
+      continue;
+    }
+
+    stripped += char;
+  }
+
+  return stripped;
 }
