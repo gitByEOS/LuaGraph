@@ -8,6 +8,12 @@ export type LuaGraphConfig = {
   readonly databaseDir: string;
 };
 
+export type ScannedLuaFile = {
+  readonly path: NormalizedPath;
+  readonly size: number;
+  readonly modifiedAt: Date;
+};
+
 export type SchemaStatement = {
   readonly name: string;
   readonly cypher: string;

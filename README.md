@@ -89,3 +89,16 @@ node dist/cli.js init <tmp>
 ```
 
 并验证 `<tmp>/.luagraph/config.json` 与 `<tmp>/.luagraph/kuzu` 已创建。
+
+Scanner 模块验收：
+
+```bash
+submit/test-agent-scanner.sh
+```
+
+`submit/test-agent-scanner.sh` 会从自身位置定位项目根，并依次执行：
+
+```bash
+vp test test/scanner.test.ts
+vp check
+```
