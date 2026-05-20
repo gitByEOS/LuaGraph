@@ -11,13 +11,22 @@ import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
 import type { LuaSymbol, NormalizedPath, ScannedLuaFile, SyncResult } from "./types.js";
 
+export type SyncProjectOptions = {
+  readonly onProgress?: SyncProgressReporter;
+};
+
+export type SyncProgressReporter = (message: string) => void;
+
 type HashedLuaFile = {
   readonly file: ScannedLuaFile;
   readonly content: string;
   readonly contentHash: string;
 };
 
-export async function syncProject(projectRoot: string): Promise<SyncResult> {
+export async function syncProject(
+  projectRoot: string,
+  options: SyncProjectOptions = {},
+): Promise<SyncResult> {
   const resolvedProjectRoot = nodePath.resolve(projectRoot);
 
   await assertExistingDirectory(resolvedProjectRoot, projectRoot);
@@ -27,7 +36,9 @@ export async function syncProject(projectRoot: string): Promise<SyncResult> {
     throw new Error(`项目缺少配置文件：${nodePath.join(resolvedProjectRoot, configPath)}`);
   }
 
+  reportProgress(options, "开始扫描 Lua 文件");
   const files = await scanLuaFiles(resolvedProjectRoot, config);
+  reportProgress(options, `扫描到 ${files.length} 个 Lua 文件`);
   const currentFiles = await hashLuaFiles(resolvedProjectRoot, files);
   const databaseDir = nodePath.resolve(resolvedProjectRoot, config.databaseDir);
   const databasePath = getKuzuDatabasePath(databaseDir);
@@ -40,13 +51,16 @@ export async function syncProject(projectRoot: string): Promise<SyncResult> {
   try {
     await initializeSchema(connection);
 
+    reportProgress(options, "开始对比 contentHash");
     const indexedFileHashes = await queryIndexedFileHashes(connection);
+    const currentFilePaths = new Set(currentFiles.map((file) => file.file.path));
     const changedFiles = currentFiles.filter(
       (file) => indexedFileHashes.get(file.file.path) !== file.contentHash,
     );
     const removedFilePaths = [...indexedFileHashes.keys()].filter(
-      (path) => !currentFiles.some((file) => file.file.path === path),
+      (path) => !currentFilePaths.has(path),
     );
+    reportProgress(options, `待刷新 ${changedFiles.length} 个文件，待删除 ${removedFilePaths.length} 个文件`);
 
     const affectedFilePaths = [
       ...removedFilePaths,
@@ -55,23 +69,34 @@ export async function syncProject(projectRoot: string): Promise<SyncResult> {
 
     await deleteCallsForFiles(connection, affectedFilePaths);
     await removeIndexedFiles(connection, affectedFilePaths);
-    await writeChangedFiles(connection, changedFiles);
+    await writeChangedFiles(connection, changedFiles, options);
+    let callsCount = 0;
     if (affectedFilePaths.length > 0) {
-      await rebuildCallsRelationships(
+      reportProgress(options, "开始重建 Calls");
+      callsCount = await rebuildCallsRelationships(
         connection,
         currentFiles.map((file) => parseLuaFile(file.file.path, file.content)),
       );
+    } else {
+      reportProgress(options, "跳过重建 Calls：无变更文件");
     }
+
+    const symbolCount = await countQuery(connection, "MATCH (symbol:Symbol) RETURN count(symbol) AS count;");
+    const containsCount = await countQuery(
+      connection,
+      "MATCH (:File)-[contains:Contains]->(:Symbol) RETURN count(contains) AS count;",
+    );
+    reportProgress(
+      options,
+      `完成统计：扫描 ${files.length}，刷新 ${changedFiles.length}，删除 ${removedFilePaths.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}`,
+    );
 
     return {
       scannedFileCount: files.length,
       changedFileCount: changedFiles.length,
       removedFileCount: removedFilePaths.length,
-      symbolCount: await countQuery(connection, "MATCH (symbol:Symbol) RETURN count(symbol) AS count;"),
-      containsCount: await countQuery(
-        connection,
-        "MATCH (:File)-[contains:Contains]->(:Symbol) RETURN count(contains) AS count;",
-      ),
+      symbolCount,
+      containsCount,
       databaseDir,
     };
   } finally {
@@ -140,8 +165,9 @@ async function removeIndexedFiles(
 async function writeChangedFiles(
   connection: Connection,
   files: readonly HashedLuaFile[],
+  options: SyncProjectOptions,
 ): Promise<void> {
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     const parsed = parseLuaFile(file.file.path, file.content);
 
     await insertFile(connection, file, parsed.symbols.length);
@@ -151,7 +177,16 @@ async function writeChangedFiles(
     }
 
     await insertContainsRelationships(connection, file.file.path, parsed.symbols);
+    reportFileProgress(options, file.file.path, index + 1, files.length);
   }
+}
+
+function reportFileProgress(options: SyncProjectOptions, filePath: NormalizedPath, done: number, total: number): void {
+  reportProgress(options, `同步文件[${done}/${total}] ${nodePath.basename(filePath)}`);
+}
+
+function reportProgress(options: SyncProjectOptions, message: string): void {
+  options.onProgress?.(message);
 }
 
 async function insertFile(

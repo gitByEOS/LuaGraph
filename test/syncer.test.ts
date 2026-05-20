@@ -116,6 +116,30 @@ describe("syncProject", () => {
       nodes: [{ qualifiedName: "init" }],
     });
   });
+
+  it("传入 onProgress 时报告同步进度", async () => {
+    const projectRoot = await createTempProject();
+    const messages: string[] = [];
+
+    await writeLuaFile(projectRoot, "src/player.lua", "function before()\nend\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+    await writeLuaFile(projectRoot, "src/player.lua", "function after()\nend\n");
+
+    await syncProject(projectRoot, { onProgress: (message) => messages.push(message) });
+
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        "开始扫描 Lua 文件",
+        "扫描到 1 个 Lua 文件",
+        "开始对比 contentHash",
+        "待刷新 1 个文件，待删除 0 个文件",
+        "同步文件[1/1] player.lua",
+        "开始重建 Calls",
+        "完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0",
+      ]),
+    );
+  });
 });
 
 async function createTempProject(): Promise<string> {

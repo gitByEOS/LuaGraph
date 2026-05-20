@@ -217,7 +217,11 @@ export function createCli(): Command {
       }
 
       try {
-        const result = await syncProject(projectRoot ?? process.cwd());
+        const result = await syncProject(projectRoot ?? process.cwd(), {
+          ...(options?.quiet === true
+            ? {}
+            : { onProgress: (message: string) => console.error(`[sync] ${message}`) }),
+        });
 
         if (options?.quiet === true) {
           return;

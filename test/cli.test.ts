@@ -188,6 +188,7 @@ describe("luagraph sync CLI", () => {
   it("sync 命令输出可解析 JSON", async () => {
     const projectRoot = await createTempProject();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const cli = createTestCli();
 
     await writeLuaFile(projectRoot, "src/player.lua", "function before()\nend\n");
@@ -210,8 +211,42 @@ describe("luagraph sync CLI", () => {
       containsCount: 1,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
+    expect(error.mock.calls.map((call) => String(call[0]))).toEqual(
+      expect.arrayContaining([
+        "[sync] 开始扫描 Lua 文件",
+        "[sync] 扫描到 1 个 Lua 文件",
+        "[sync] 开始对比 contentHash",
+        "[sync] 待刷新 1 个文件，待删除 0 个文件",
+        "[sync] 同步文件[1/1] player.lua",
+        "[sync] 开始重建 Calls",
+        "[sync] 完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0",
+      ]),
+    );
 
     log.mockRestore();
+    error.mockRestore();
+  });
+
+  it("sync --quiet 不输出结果和进度", async () => {
+    const projectRoot = await createTempProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const cli = createTestCli();
+
+    await writeLuaFile(projectRoot, "src/player.lua", "function before()\nend\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+    await writeLuaFile(projectRoot, "src/player.lua", "function after()\nend\n");
+
+    await cli.parseAsync(["node", "luagraph", "sync", projectRoot, "--quiet"], {
+      from: "node",
+    });
+
+    expect(log).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+
+    log.mockRestore();
+    error.mockRestore();
   });
 });
 
