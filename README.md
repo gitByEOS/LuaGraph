@@ -66,3 +66,26 @@ vp install
 vp test test/store.test.ts
 vp check
 ```
+
+init-real 验收：
+
+```bash
+submit/test-agent-init-real.sh
+```
+
+`submit/test-agent-init-real.sh` 会从自身位置定位项目根，并依次执行：
+
+```bash
+vp install
+vp test
+vp check
+vp run build
+```
+
+随后脚本会在临时目录执行：
+
+```bash
+node dist/cli.js init <tmp>
+```
+
+并验证 `<tmp>/.luagraph/config.json` 与 `<tmp>/.luagraph/kuzu` 已创建。

@@ -18,3 +18,10 @@ export type InitPlan = {
   readonly config: LuaGraphConfig;
   readonly schema: readonly SchemaStatement[];
 };
+
+export type InitResult = {
+  readonly projectRoot: string;
+  readonly configPath: string;
+  readonly databaseDir: string;
+  readonly schemaCount: number;
+};

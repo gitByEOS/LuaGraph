@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { Command } from "commander";
 
-import { createInitPlan } from "./init.js";
+import { initializeProject } from "./init.js";
 
 export function createCli(): Command {
   const program = new Command();
@@ -15,21 +15,25 @@ export function createCli(): Command {
     .command("init")
     .argument("[project_root]", "项目根目录")
     .description("初始化 LuaGraph 项目")
-    .action((projectRoot?: string) => {
+    .action(async (projectRoot?: string) => {
       if (projectRoot === undefined || projectRoot.length === 0) {
         program.error("请指定项目路径：luagraph init <project_root>");
         return;
       }
 
-      const plan = createInitPlan(projectRoot);
-      console.log(JSON.stringify(plan, null, 2));
+      try {
+        const result = await initializeProject(projectRoot);
+        console.log(JSON.stringify(result, null, 2));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
     });
 
   return program;
 }
 
 if (isCliEntrypoint()) {
-  createCli().parse();
+  createCli().parseAsync();
 }
 
 function isCliEntrypoint(): boolean {
