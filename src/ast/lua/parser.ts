@@ -1,5 +1,8 @@
 import nodePath from "node:path";
 
+import Parser from "tree-sitter";
+import Lua from "tree-sitter-lua";
+
 import type { ParsedCall, ParsedExtend, ParsedFile, ParsedRequire, ParsedSymbol, NormalizedPath, SymbolKind } from "../types.js";
 
 type SymbolDraft = {
@@ -14,155 +17,176 @@ type SymbolDraft = {
   readonly isLocal: boolean;
 };
 
-type FunctionScope = {
-  readonly draft: SymbolDraft;
-  readonly closeDepth: number;
+type LuaContext = {
+  readonly filePath: NormalizedPath;
+  readonly source: string;
+  readonly lines: readonly string[];
+  readonly rootNode: Parser.SyntaxNode;
 };
 
-const classPattern =
-  /^(?<indent>\s*)(?<local>local\s+)?(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*class\s*\(\s*["'](?<literal>[A-Za-z_][A-Za-z0-9_]*)["'](?:\s*,\s*(?<parent>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*))?/;
-const tablePattern = /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\{|$)/;
-const setmetatableExtendsPattern =
-  /^(?<indent>\s*)(?<local>local\s+)?(?<child>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*setmetatable\s*\(\s*\{\s*\}\s*,\s*\{\s*__index\s*=\s*(?<parent>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\s*\)/;
-const functionPattern =
-  /^(?<indent>\s*)(?<local>local\s+)?function\s+(?<qualifiedName>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/;
-const callPattern = /(?<![A-Za-z0-9_])(?<callee>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/g;
-const requirePattern =
-  /(?<![A-Za-z0-9_])require\s*(?:\(\s*(?<parenthesizedExpression>[^)]*?)\s*\)|(?<bareExpression>["'][^"']+["']))/g;
+const luaParser = new Parser();
+luaParser.setLanguage(Lua);
 
-// Phase 1 最小提取：行级模式只识别声明入口，不伪装完整 Lua AST。
 export function parseLuaFile(pathValue: string, source: string): ParsedFile {
   const filePath = normalizeRepositoryPath(pathValue);
-  const symbols = extractLuaSymbols(filePath, source);
-  const calls = extractLuaCalls(filePath, source);
-  const extendsRelationships = extractLuaExtends(filePath, source);
-  const requires = extractLuaRequires(filePath, source);
+  const context = createLuaContext(filePath, source);
 
   return {
     type: "File",
     path: filePath,
-    symbols,
-    calls,
-    extends: extendsRelationships,
-    requires,
+    symbols: extractLuaSymbolsFromTree(context),
+    calls: extractLuaCallsFromTree(context),
+    extends: extractLuaExtendsFromTree(context),
+    requires: extractLuaRequiresFromTree(context),
   };
 }
 
 export function extractLuaSymbols(filePath: NormalizedPath, source: string): readonly ParsedSymbol[] {
-  const lines = source.split(/\r\n|\n|\r/);
-  const drafts = extractSymbolDrafts(lines);
-
-  return drafts.map((draft) => createSymbol(filePath, draft));
+  return extractLuaSymbolsFromTree(createLuaContext(filePath, source));
 }
 
 export function extractLuaCalls(filePath: NormalizedPath, source: string): readonly ParsedCall[] {
-  return source
-    .split(/\r\n|\n|\r/)
-    .flatMap((line, index) => parseCallLine(filePath, stripLuaLine(line), index + 1));
+  return extractLuaCallsFromTree(createLuaContext(filePath, source));
 }
 
 export function extractLuaExtends(filePath: NormalizedPath, source: string): readonly ParsedExtend[] {
-  return source
-    .split(/\r\n|\n|\r/)
-    .flatMap((line, index) => parseExtendsLine(filePath, stripLuaComment(line), index + 1));
+  return extractLuaExtendsFromTree(createLuaContext(filePath, source));
 }
 
 export function extractLuaRequires(filePath: NormalizedPath, source: string): readonly ParsedRequire[] {
-  return source
-    .split(/\r\n|\n|\r/)
-    .flatMap((line, index) => parseRequireLine(filePath, stripLuaComment(line), index + 1));
+  return extractLuaRequiresFromTree(createLuaContext(filePath, source));
 }
 
-function extractSymbolDrafts(lines: readonly string[]): readonly SymbolDraft[] {
-  const drafts: SymbolDraft[] = [];
-  const functionScopes: FunctionScope[] = [];
-  let blockDepth = 0;
-
-  for (const [index, line] of lines.entries()) {
-    const lineNumber = index + 1;
-    const lineDrafts = parseLine(line, lineNumber);
-
-    for (const draft of lineDrafts) {
-      if (isFunctionDraft(draft)) {
-        functionScopes.push({ draft, closeDepth: blockDepth });
-      } else {
-        drafts.push(draft);
-      }
-    }
-
-    blockDepth = Math.max(0, blockDepth + getLuaBlockDelta(line));
-    closeResolvedFunctions(functionScopes, drafts, blockDepth, lineNumber, line.length);
-  }
-
-  closeOpenFunctionsAtFileEnd(functionScopes, drafts, lines);
-
-  return drafts.sort((left, right) => left.startLine - right.startLine || left.startColumn - right.startColumn);
+function createLuaContext(filePath: NormalizedPath, source: string): LuaContext {
+  return {
+    filePath,
+    source,
+    lines: source.split(/\r\n|\n|\r/),
+    rootNode: luaParser.parse(source).rootNode,
+  };
 }
 
-function parseLine(line: string, lineNumber: number): readonly SymbolDraft[] {
-  const extendsClassSymbol = parseSetmetatableExtendsLine(line, lineNumber);
+function extractLuaSymbolsFromTree(context: LuaContext): readonly ParsedSymbol[] {
+  const drafts = [
+    ...context.rootNode.descendantsOfType(["variable_assignment", "local_variable_declaration"]).flatMap((node) =>
+      parseAssignmentSymbol(context, node),
+    ),
+    ...context.rootNode.descendantsOfType(["function_definition_statement", "local_function_definition_statement"]).flatMap((node) =>
+      parseFunctionSymbol(context, node),
+    ),
+  ];
 
-  if (extendsClassSymbol !== undefined) {
-    return [extendsClassSymbol];
-  }
-
-  const classSymbol = parseClassLine(line, lineNumber);
-
-  if (classSymbol !== undefined) {
-    return [classSymbol];
-  }
-
-  const tableSymbol = parseTableLine(line, lineNumber);
-  if (tableSymbol !== undefined) {
-    return [tableSymbol];
-  }
-
-  const functionSymbol = parseFunctionLine(line, lineNumber);
-
-  return functionSymbol === undefined ? [] : [functionSymbol];
+  return drafts
+    .sort((left, right) => left.startLine - right.startLine || left.startColumn - right.startColumn)
+    .map((draft) => createSymbol(context.filePath, draft));
 }
 
-function parseCallLine(
-  filePath: NormalizedPath,
-  strippedLine: string,
-  lineNumber: number,
-): readonly ParsedCall[] {
-  const calls: ParsedCall[] = [];
-
-  for (const match of strippedLine.matchAll(callPattern)) {
-    const callee = match.groups?.callee;
-    const callIndex = match.index;
-    if (callee === undefined || callIndex === undefined || isDeclarationCallMatch(strippedLine, callIndex)) {
-      continue;
-    }
-
-    calls.push({
-      type: "Call",
-      filePath,
-      calleeQualifiedName: callee,
-      line: lineNumber,
-      column: callIndex + 1,
-    });
-  }
-
-  return calls;
+function extractLuaCallsFromTree(context: LuaContext): readonly ParsedCall[] {
+  return context.rootNode
+    .descendantsOfType("call")
+    .flatMap((node) => parseCall(context.filePath, node));
 }
 
-function parseExtendsLine(
-  filePath: NormalizedPath,
-  strippedLine: string,
-  lineNumber: number,
-): readonly ParsedExtend[] {
-  const match = setmetatableExtendsPattern.exec(strippedLine) ?? classPattern.exec(strippedLine);
+function extractLuaExtendsFromTree(context: LuaContext): readonly ParsedExtend[] {
+  return context.rootNode
+    .descendantsOfType(["variable_assignment", "local_variable_declaration"])
+    .flatMap((node) => parseExtends(context.filePath, node));
+}
 
-  if (match?.groups === undefined) {
+function extractLuaRequiresFromTree(context: LuaContext): readonly ParsedRequire[] {
+  return context.rootNode
+    .descendantsOfType("call")
+    .flatMap((node) => parseRequire(context.filePath, node));
+}
+
+function parseAssignmentSymbol(context: LuaContext, node: Parser.SyntaxNode): readonly SymbolDraft[] {
+  const assignment = readAssignment(node);
+
+  if (assignment === undefined) {
     return [];
   }
 
-  const child = match.groups.child ?? match.groups.name;
-  const parent = match.groups.parent;
+  if (isCallNamed(assignment.value, "class") || getSetmetatableParent(assignment.value) !== undefined) {
+    return [createAssignmentSymbol(context, node, assignment, "class")];
+  }
 
-  if (child === undefined || parent === undefined || child === parent) {
+  if (isRootTableAssignment(node, assignment)) {
+    return [createAssignmentSymbol(context, node, assignment, "table")];
+  }
+
+  return [];
+}
+
+function parseFunctionSymbol(context: LuaContext, node: Parser.SyntaxNode): readonly SymbolDraft[] {
+  const nameNode = node.namedChildren.find((child) => child.type === "variable" || child.type === "identifier");
+
+  if (nameNode === undefined) {
+    return [];
+  }
+
+  const qualifiedName = nameNode.text;
+  return [
+    {
+      kind: getFunctionKind(qualifiedName),
+      name: getSymbolName(qualifiedName),
+      qualifiedName,
+      startLine: toLine(node),
+      endLine: node.endPosition.row + 1,
+      startColumn: toColumn(node),
+      endColumn: node.endPosition.column,
+      signature: getSignature(context.lines, node),
+      isLocal: node.type === "local_function_definition_statement",
+    },
+  ];
+}
+
+function createAssignmentSymbol(
+  context: LuaContext,
+  node: Parser.SyntaxNode,
+  assignment: AssignmentNode,
+  kind: Extract<SymbolKind, "class" | "table">,
+): SymbolDraft {
+  return {
+    kind,
+    name: assignment.name,
+    qualifiedName: assignment.name,
+    startLine: toLine(node),
+    endLine: node.endPosition.row + 1,
+    startColumn: toColumn(node),
+    endColumn: node.endPosition.column,
+    signature: getSignature(context.lines, node),
+    isLocal: node.type === "local_variable_declaration",
+  };
+}
+
+function parseCall(filePath: NormalizedPath, node: Parser.SyntaxNode): readonly ParsedCall[] {
+  const calleeQualifiedName = getCallCalleeName(node);
+
+  if (calleeQualifiedName === undefined) {
+    return [];
+  }
+
+  return [
+    {
+      type: "Call",
+      filePath,
+      calleeQualifiedName,
+      line: toLine(node),
+      column: toColumn(node),
+    },
+  ];
+}
+
+function parseExtends(filePath: NormalizedPath, node: Parser.SyntaxNode): readonly ParsedExtend[] {
+  const assignment = readAssignment(node);
+
+  if (assignment === undefined) {
+    return [];
+  }
+
+  const parentQualifiedName = getClassParent(assignment.value) ?? getSetmetatableParent(assignment.value);
+
+  if (parentQualifiedName === undefined || assignment.name === parentQualifiedName) {
     return [];
   }
 
@@ -170,155 +194,37 @@ function parseExtendsLine(
     {
       type: "Extends",
       filePath,
-      childQualifiedName: child,
-      parentQualifiedName: parent,
-      line: lineNumber,
-      column: getDeclarationColumn(match.groups.indent),
+      childQualifiedName: assignment.name,
+      parentQualifiedName,
+      line: toLine(node),
+      column: toColumn(node),
     },
   ];
 }
 
-function parseRequireLine(
-  filePath: NormalizedPath,
-  line: string,
-  lineNumber: number,
-): readonly ParsedRequire[] {
-  const requires: ParsedRequire[] = [];
+function parseRequire(filePath: NormalizedPath, node: Parser.SyntaxNode): readonly ParsedRequire[] {
+  if (!isCallNamed(node, "require")) {
+    return [];
+  }
 
-  for (const match of line.matchAll(requirePattern)) {
-    const expression = match.groups?.parenthesizedExpression ?? match.groups?.bareExpression;
-    const callIndex = match.index;
-    if (expression === undefined || callIndex === undefined || isInsideLuaString(line, callIndex)) {
-      continue;
-    }
+  const argument = getFirstCallArgument(node);
 
-    const moduleName = parseStaticRequireModule(expression) ?? normalizeRequireExpression(expression);
-    if (moduleName.length === 0) {
-      continue;
-    }
+  if (argument === undefined) {
+    return [];
+  }
 
-    requires.push({
+  const moduleName = parseStaticRequireModule(argument) ?? normalizeRequireExpression(argument.text);
+
+  return [
+    {
       type: "Require",
       filePath,
       moduleName,
-      isStatic: parseStaticRequireModule(expression) !== undefined,
-      line: lineNumber,
-      column: callIndex + 1,
-    });
-  }
-
-  return requires;
-}
-
-function isDeclarationCallMatch(line: string, callIndex: number): boolean {
-  return /\bfunction\s+$/.test(line.slice(0, callIndex));
-}
-
-function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefined {
-  const match = classPattern.exec(line);
-
-  if (match?.groups === undefined) {
-    return undefined;
-  }
-
-  const name = match.groups.name;
-
-  if (name === undefined) {
-    return undefined;
-  }
-
-  return {
-    kind: "class",
-    name,
-    qualifiedName: name,
-    startLine: lineNumber,
-    endLine: lineNumber,
-    startColumn: getDeclarationColumn(match.groups.indent),
-    endColumn: line.length,
-    signature: line.trim(),
-    isLocal: match.groups.local !== undefined,
-  };
-}
-
-function parseSetmetatableExtendsLine(line: string, lineNumber: number): SymbolDraft | undefined {
-  const match = setmetatableExtendsPattern.exec(stripLuaLine(line));
-
-  if (match?.groups === undefined) {
-    return undefined;
-  }
-
-  const child = match.groups.child;
-
-  if (child === undefined) {
-    return undefined;
-  }
-
-  return {
-    kind: "class",
-    name: child,
-    qualifiedName: child,
-    startLine: lineNumber,
-    endLine: lineNumber,
-    startColumn: getDeclarationColumn(match.groups.indent),
-    endColumn: line.length,
-    signature: line.trim(),
-    isLocal: match.groups.local !== undefined,
-  };
-}
-
-function parseTableLine(line: string, lineNumber: number): SymbolDraft | undefined {
-  const match = tablePattern.exec(line);
-
-  if (match?.groups === undefined) {
-    return undefined;
-  }
-
-  if ((match.groups.indent ?? "").length > 0) {
-    return undefined;
-  }
-
-  const name = match.groups.name;
-  if (name === undefined) {
-    return undefined;
-  }
-
-  return {
-    kind: "table",
-    name,
-    qualifiedName: name,
-    startLine: lineNumber,
-    endLine: lineNumber,
-    startColumn: getDeclarationColumn(match.groups.indent),
-    endColumn: line.length,
-    signature: line.trim(),
-    isLocal: false,
-  };
-}
-
-function parseFunctionLine(line: string, lineNumber: number): SymbolDraft | undefined {
-  const match = functionPattern.exec(line);
-
-  if (match?.groups === undefined) {
-    return undefined;
-  }
-
-  const qualifiedName = match.groups.qualifiedName;
-
-  if (qualifiedName === undefined) {
-    return undefined;
-  }
-
-  return {
-    kind: getFunctionKind(qualifiedName),
-    name: getSymbolName(qualifiedName),
-    qualifiedName,
-    startLine: lineNumber,
-    endLine: lineNumber,
-    startColumn: getDeclarationColumn(match.groups.indent),
-    endColumn: line.length,
-    signature: line.trim(),
-    isLocal: match.groups.local !== undefined,
-  };
+      isStatic: argument.type === "string",
+      line: toLine(node),
+      column: toColumn(node),
+    },
+  ];
 }
 
 function createSymbol(filePath: NormalizedPath, draft: SymbolDraft): ParsedSymbol {
@@ -340,8 +246,119 @@ function createSymbol(filePath: NormalizedPath, draft: SymbolDraft): ParsedSymbo
   };
 }
 
-function getDeclarationColumn(indent: string | undefined): number {
-  return (indent?.length ?? 0) + 1;
+type AssignmentNode = {
+  readonly name: string;
+  readonly variable: Parser.SyntaxNode;
+  readonly value: Parser.SyntaxNode;
+};
+
+function readAssignment(node: Parser.SyntaxNode): AssignmentNode | undefined {
+  const variable = firstNamedChildOfType(node, "variable_list")?.namedChildren[0];
+  const value = firstNamedChildOfType(node, "expression_list")?.namedChildren[0];
+
+  if (variable?.type !== "variable" || value === undefined) {
+    return undefined;
+  }
+
+  return {
+    name: variable.text,
+    variable,
+    value,
+  };
+}
+
+function firstNamedChildOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | undefined {
+  return node.namedChildren.find((child) => child.type === type);
+}
+
+function isRootTableAssignment(node: Parser.SyntaxNode, assignment: AssignmentNode): boolean {
+  return node.type === "variable_assignment" && node.parent?.type === "chunk" && assignment.variable.startPosition.column === 0 && assignment.value.type === "table";
+}
+
+function isCallNamed(node: Parser.SyntaxNode, name: string): boolean {
+  return getCallCalleeName(node) === name;
+}
+
+function getCallCalleeName(node: Parser.SyntaxNode): string | undefined {
+  const callee = node.namedChildren[0];
+
+  return callee?.type === "variable" ? callee.text : undefined;
+}
+
+function getFirstCallArgument(node: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  const argumentList = firstNamedChildOfType(node, "argument_list");
+  const argument = argumentList?.namedChildren[0];
+
+  return argument?.type === "expression_list" ? argument.namedChildren[0] : argument;
+}
+
+function getCallArguments(node: Parser.SyntaxNode): readonly Parser.SyntaxNode[] {
+  const argumentList = firstNamedChildOfType(node, "argument_list");
+  const argument = argumentList?.namedChildren[0];
+
+  return argument?.type === "expression_list" ? argument.namedChildren : argumentList?.namedChildren ?? [];
+}
+
+function getClassParent(node: Parser.SyntaxNode): string | undefined {
+  if (!isCallNamed(node, "class")) {
+    return undefined;
+  }
+
+  const parent = getCallArguments(node)[1];
+
+  return parent?.type === "variable" ? parent.text : undefined;
+}
+
+function getSetmetatableParent(node: Parser.SyntaxNode): string | undefined {
+  if (!isCallNamed(node, "setmetatable")) {
+    return undefined;
+  }
+
+  const metatable = getCallArguments(node)[1];
+  const indexField = metatable?.descendantsOfType("field").find(isIndexField);
+  const parent = indexField?.namedChildren[1];
+
+  return parent?.type === "variable" ? parent.text : undefined;
+}
+
+function isIndexField(node: Parser.SyntaxNode): boolean {
+  return node.namedChildren[0]?.text === "__index";
+}
+
+function parseStaticRequireModule(node: Parser.SyntaxNode): string | undefined {
+  if (node.type !== "string") {
+    return undefined;
+  }
+
+  return unwrapLuaString(node.text);
+}
+
+function unwrapLuaString(value: string): string {
+  const quote = value[0];
+
+  if ((quote === '"' || quote === "'") && value.endsWith(quote)) {
+    return value.slice(1, -1);
+  }
+
+  const longString = /^\[(=*)\[([\s\S]*)\]\1\]$/.exec(value);
+
+  return longString?.[2] ?? value;
+}
+
+function normalizeRequireExpression(expression: string): string {
+  return expression.trim().replace(/\s+/g, " ");
+}
+
+function getSignature(lines: readonly string[], node: Parser.SyntaxNode): string {
+  return lines[node.startPosition.row]?.trim() ?? node.text.trim();
+}
+
+function toLine(node: Parser.SyntaxNode): number {
+  return node.startPosition.row + 1;
+}
+
+function toColumn(node: Parser.SyntaxNode): number {
+  return node.startPosition.column + 1;
 }
 
 function getFunctionKind(qualifiedName: string): SymbolKind {
@@ -351,182 +368,6 @@ function getFunctionKind(qualifiedName: string): SymbolKind {
 function getSymbolName(qualifiedName: string): string {
   const segments = qualifiedName.split(/[.:]/);
   return segments[segments.length - 1] ?? qualifiedName;
-}
-
-function isFunctionDraft(draft: SymbolDraft): boolean {
-  return draft.kind === "function" || draft.kind === "method";
-}
-
-function closeResolvedFunctions(
-  functionScopes: FunctionScope[],
-  drafts: SymbolDraft[],
-  blockDepth: number,
-  lineNumber: number,
-  endColumn: number,
-): void {
-  while (functionScopes.length > 0) {
-    const current = functionScopes[functionScopes.length - 1];
-
-    if (current === undefined || blockDepth > current.closeDepth) {
-      return;
-    }
-
-    functionScopes.pop();
-    drafts.push(closeFunctionDraft(current.draft, lineNumber, endColumn));
-  }
-}
-
-function closeOpenFunctionsAtFileEnd(
-  functionScopes: FunctionScope[],
-  drafts: SymbolDraft[],
-  lines: readonly string[],
-): void {
-  const endLine = Math.max(1, lines.length);
-  const endColumn = lines[endLine - 1]?.length ?? 0;
-
-  while (functionScopes.length > 0) {
-    const current = functionScopes.pop();
-
-    if (current !== undefined) {
-      drafts.push(closeFunctionDraft(current.draft, endLine, endColumn));
-    }
-  }
-}
-
-function closeFunctionDraft(draft: SymbolDraft, endLine: number, endColumn: number): SymbolDraft {
-  return {
-    ...draft,
-    endLine,
-    endColumn,
-  };
-}
-
-function getLuaBlockDelta(line: string): number {
-  const tokens = getLuaTokens(line);
-  let openCount = 0;
-  let closeCount = 0;
-
-  for (const [index, token] of tokens.entries()) {
-    const previousToken = tokens[index - 1];
-
-    if (token === "function" || token === "repeat" || token === "do") {
-      openCount += 1;
-    }
-
-    if (token === "then" && previousToken !== "elseif") {
-      openCount += 1;
-    }
-
-    if (token === "end" || token === "until") {
-      closeCount += 1;
-    }
-  }
-
-  return openCount - closeCount;
-}
-
-function getLuaTokens(line: string): readonly string[] {
-  return stripLuaLine(line).match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
-}
-
-function stripLuaLine(line: string): string {
-  let stripped = "";
-  let quote: string | undefined;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const nextChar = line[index + 1];
-
-    if (quote !== undefined) {
-      stripped += " ";
-
-      if (char === "\\") {
-        index += 1;
-        stripped += " ";
-      } else if (char === quote) {
-        quote = undefined;
-      }
-
-      continue;
-    }
-
-    if (char === "-" && nextChar === "-") {
-      break;
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-      stripped += " ";
-      continue;
-    }
-
-    stripped += char;
-  }
-
-  return stripped;
-}
-
-function stripLuaComment(line: string): string {
-  let quote: string | undefined;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const nextChar = line[index + 1];
-
-    if (quote !== undefined) {
-      if (char === "\\") {
-        index += 1;
-      } else if (char === quote) {
-        quote = undefined;
-      }
-
-      continue;
-    }
-
-    if (char === "-" && nextChar === "-") {
-      return line.slice(0, index);
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-    }
-  }
-
-  return line;
-}
-
-function parseStaticRequireModule(expression: string): string | undefined {
-  const match = /^\s*(["'])(?<moduleName>[^"']+)\1\s*$/.exec(expression);
-
-  return match?.groups?.moduleName;
-}
-
-function normalizeRequireExpression(expression: string): string {
-  return expression.trim().replace(/\s+/g, " ");
-}
-
-function isInsideLuaString(line: string, targetIndex: number): boolean {
-  let quote: string | undefined;
-
-  for (let index = 0; index < targetIndex; index += 1) {
-    const char = line[index];
-
-    if (quote !== undefined) {
-      if (char === "\\") {
-        index += 1;
-      } else if (char === quote) {
-        quote = undefined;
-      }
-
-      continue;
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-    }
-  }
-
-  return quote !== undefined;
 }
 
 function normalizeRepositoryPath(value: string): NormalizedPath {

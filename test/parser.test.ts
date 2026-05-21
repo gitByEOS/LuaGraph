@@ -209,6 +209,21 @@ describe("Lua parser Phase 1 最小提取", () => {
     ]);
   });
 
+  it("通过语法树识别长字符串 require", () => {
+    const file = parseLuaFile("src/long-require.lua", "local M = require [[feature.long_name]]");
+
+    expect(file.requires).toEqual([
+      {
+        type: "Require",
+        filePath: "src/long-require.lua",
+        moduleName: "feature.long_name",
+        isStatic: true,
+        line: 1,
+        column: 11,
+      },
+    ]);
+  });
+
   it("用黄金样本对账函数范围和漏识别符号", () => {
     const source = [
       'Player = class("Player", Base)',
