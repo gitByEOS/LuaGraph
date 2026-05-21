@@ -4,12 +4,12 @@ import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { getLanguageAdapter } from "../ast/registry.js";
+import { getLanguageAdapter, type LanguageAdapter } from "../ast/registry.js";
 import { readConfig } from "./config.js";
-import { scanLuaFiles } from "./scanner.js";
+import { scanProjectFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
 import type { NormalizedPath, ParsedFile, ParsedSymbol } from "../ast/types.js";
-import type { IndexResult, ScannedLuaFile } from "./project-types.js";
+import type { IndexResult, ScannedProjectFile } from "./project-types.js";
 
 export type IndexProjectOptions = {
   readonly force?: boolean;
@@ -19,8 +19,9 @@ export type IndexProjectOptions = {
 export type IndexProgressReporter = (message: string) => void;
 
 type ParsedProjectFile = {
-  readonly file: ScannedLuaFile;
+  readonly file: ScannedProjectFile;
   readonly content: string;
+  readonly adapter: LanguageAdapter;
   readonly parsed: ParsedFile;
 };
 
@@ -35,9 +36,9 @@ export async function indexProject(
     throw new Error(`未找到配置文件: ${resolvedProjectRoot}/.luagraph/config.json`);
   }
 
-  reportProgress(options, "开始扫描 Lua 文件");
-  const files = await scanLuaFiles(resolvedProjectRoot, config);
-  reportProgress(options, `扫描到 ${files.length} 个 Lua 文件`);
+  reportProgress(options, "开始扫描项目文件");
+  const files = await scanProjectFiles(resolvedProjectRoot, config);
+  reportProgress(options, `扫描到 ${files.length} 个项目文件`);
   const databaseDir = nodePath.resolve(resolvedProjectRoot, config.databaseDir);
   const databasePath = getKuzuDatabasePath(databaseDir);
 
@@ -55,7 +56,7 @@ export async function indexProject(
 
   try {
     await initializeSchema(connection);
-    reportProgress(options, "开始索引 Lua 符号");
+    reportProgress(options, "开始索引项目符号");
     const parsedFiles = await readParsedProjectFiles(resolvedProjectRoot, files);
 
     for (const [index, parsedFile] of parsedFiles.entries()) {
@@ -72,11 +73,11 @@ export async function indexProject(
       reportFileProgress(options, file.path, index + 1, files.length);
     }
 
-    const adapter = getLanguageAdapter();
-    const parsedProjectFiles = parsedFiles.map((file) => file.parsed);
-    callsCount = await adapter.rebuildCallsRelationships(connection, parsedProjectFiles);
-    extendsCount = await adapter.rebuildExtendsRelationships(connection, parsedProjectFiles);
-    requiresCount = await adapter.rebuildRequiresRelationships(connection, parsedProjectFiles);
+    for (const [adapter, parsedProjectFiles] of groupParsedFilesByAdapter(parsedFiles)) {
+      callsCount += await adapter.rebuildCallsRelationships(connection, parsedProjectFiles);
+      extendsCount += await adapter.rebuildExtendsRelationships(connection, parsedProjectFiles);
+      requiresCount += await adapter.rebuildRequiresRelationships(connection, parsedProjectFiles);
+    }
   } finally {
     await connection.close();
     await database.close();
@@ -100,19 +101,35 @@ export async function indexProject(
 
 async function readParsedProjectFiles(
   projectRoot: string,
-  files: readonly ScannedLuaFile[],
+  files: readonly ScannedProjectFile[],
 ): Promise<ParsedProjectFile[]> {
   return Promise.all(
     files.map(async (file) => {
       const content = await readFile(nodePath.join(projectRoot, file.path), "utf8");
+      const adapter = getLanguageAdapter(file.path);
 
       return {
         file,
         content,
-        parsed: getLanguageAdapter().parseFile(file.path, content),
+        adapter,
+        parsed: adapter.parseFile(file.path, content),
       };
     }),
   );
+}
+
+function groupParsedFilesByAdapter(
+  files: readonly ParsedProjectFile[],
+): Map<LanguageAdapter, ParsedFile[]> {
+  const groups = new Map<LanguageAdapter, ParsedFile[]>();
+
+  for (const file of files) {
+    const group = groups.get(file.adapter) ?? [];
+    group.push(file.parsed);
+    groups.set(file.adapter, group);
+  }
+
+  return groups;
 }
 
 function reportFileProgress(options: IndexProjectOptions, filePath: NormalizedPath, done: number, total: number): void {
@@ -131,7 +148,7 @@ async function initializeSchema(connection: Connection): Promise<void> {
 
 async function insertFile(
   connection: Connection,
-  file: ScannedLuaFile,
+  file: ScannedProjectFile,
   content: string,
   nodeCount: number,
 ): Promise<void> {

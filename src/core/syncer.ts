@@ -4,12 +4,12 @@ import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { getLanguageAdapter } from "../ast/registry.js";
+import { getLanguageAdapter, type LanguageAdapter } from "../ast/registry.js";
 import { configPath, readConfig } from "./config.js";
-import { scanLuaFiles } from "./scanner.js";
+import { scanProjectFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
-import type { NormalizedPath, ParsedSymbol } from "../ast/types.js";
-import type { ScannedLuaFile, SyncResult } from "./project-types.js";
+import type { NormalizedPath, ParsedFile, ParsedSymbol } from "../ast/types.js";
+import type { ScannedProjectFile, SyncResult } from "./project-types.js";
 
 export type SyncProjectOptions = {
   readonly onProgress?: SyncProgressReporter;
@@ -17,10 +17,11 @@ export type SyncProjectOptions = {
 
 export type SyncProgressReporter = (message: string) => void;
 
-type HashedLuaFile = {
-  readonly file: ScannedLuaFile;
+type HashedProjectFile = {
+  readonly file: ScannedProjectFile;
   readonly content: string;
   readonly contentHash: string;
+  readonly adapter: LanguageAdapter;
 };
 
 export async function syncProject(
@@ -36,10 +37,10 @@ export async function syncProject(
     throw new Error(`项目缺少配置文件：${nodePath.join(resolvedProjectRoot, configPath)}`);
   }
 
-  reportProgress(options, "开始扫描 Lua 文件");
-  const files = await scanLuaFiles(resolvedProjectRoot, config);
-  reportProgress(options, `扫描到 ${files.length} 个 Lua 文件`);
-  const currentFiles = await hashLuaFiles(resolvedProjectRoot, files);
+  reportProgress(options, "开始扫描项目文件");
+  const files = await scanProjectFiles(resolvedProjectRoot, config);
+  reportProgress(options, `扫描到 ${files.length} 个项目文件`);
+  const currentFiles = await hashProjectFiles(resolvedProjectRoot, files);
   const databaseDir = nodePath.resolve(resolvedProjectRoot, config.databaseDir);
   const databasePath = getKuzuDatabasePath(databaseDir);
 
@@ -67,23 +68,21 @@ export async function syncProject(
       ...changedFiles.map((file) => file.file.path),
     ];
 
-    const adapter = getLanguageAdapter();
-    await adapter.deleteCallsForFiles(connection, affectedFilePaths);
-    await adapter.deleteExtendsForFiles(connection, affectedFilePaths);
-    await adapter.deleteRequiresForFiles(connection, affectedFilePaths);
+    await deleteRelationshipsByAdapter(connection, affectedFilePaths);
     await removeIndexedFiles(connection, affectedFilePaths);
     await writeChangedFiles(connection, changedFiles, options);
     let callsCount = 0;
     let extendsCount = 0;
     let requiresCount = 0;
     if (affectedFilePaths.length > 0) {
-      const parsedFiles = currentFiles.map((file) => adapter.parseFile(file.file.path, file.content));
-      reportProgress(options, "开始重建 Calls");
-      callsCount = await adapter.rebuildCallsRelationships(connection, parsedFiles);
-      reportProgress(options, "开始重建 Extends");
-      extendsCount = await adapter.rebuildExtendsRelationships(connection, parsedFiles);
-      reportProgress(options, "开始重建 Requires");
-      requiresCount = await adapter.rebuildRequiresRelationships(connection, parsedFiles);
+      for (const [adapter, parsedFiles] of parseFilesByAdapter(currentFiles)) {
+        reportProgress(options, "开始重建 Calls");
+        callsCount += await adapter.rebuildCallsRelationships(connection, parsedFiles);
+        reportProgress(options, "开始重建 Extends");
+        extendsCount += await adapter.rebuildExtendsRelationships(connection, parsedFiles);
+        reportProgress(options, "开始重建 Requires");
+        requiresCount += await adapter.rebuildRequiresRelationships(connection, parsedFiles);
+      }
     } else {
       reportProgress(options, "跳过重建 Calls：无变更文件");
       reportProgress(options, "跳过重建 Extends：无变更文件");
@@ -116,10 +115,10 @@ export async function syncProject(
   }
 }
 
-async function hashLuaFiles(
+async function hashProjectFiles(
   projectRoot: string,
-  files: readonly ScannedLuaFile[],
-): Promise<HashedLuaFile[]> {
+  files: readonly ScannedProjectFile[],
+): Promise<HashedProjectFile[]> {
   return Promise.all(
     files.map(async (file) => {
       const content = await readFile(nodePath.join(projectRoot, file.path), "utf8");
@@ -128,6 +127,7 @@ async function hashLuaFiles(
         file,
         content,
         contentHash: createContentHash(content),
+        adapter: getLanguageAdapter(file.path),
       };
     }),
   );
@@ -173,13 +173,50 @@ async function removeIndexedFiles(
   }
 }
 
+async function deleteRelationshipsByAdapter(
+  connection: Connection,
+  filePaths: readonly NormalizedPath[],
+): Promise<void> {
+  for (const [adapter, paths] of groupPathsByAdapter(filePaths)) {
+    await adapter.deleteCallsForFiles(connection, paths);
+    await adapter.deleteExtendsForFiles(connection, paths);
+    await adapter.deleteRequiresForFiles(connection, paths);
+  }
+}
+
+function groupPathsByAdapter(filePaths: readonly NormalizedPath[]): Map<LanguageAdapter, NormalizedPath[]> {
+  const groups = new Map<LanguageAdapter, NormalizedPath[]>();
+
+  for (const filePath of filePaths) {
+    const adapter = getLanguageAdapter(filePath);
+    const group = groups.get(adapter) ?? [];
+    group.push(filePath);
+    groups.set(adapter, group);
+  }
+
+  return groups;
+}
+
+function parseFilesByAdapter(files: readonly HashedProjectFile[]): Map<LanguageAdapter, ParsedFile[]> {
+  const groups = new Map<LanguageAdapter, ParsedFile[]>();
+
+  for (const file of files) {
+    const parsed = file.adapter.parseFile(file.file.path, file.content);
+    const group = groups.get(file.adapter) ?? [];
+    group.push(parsed);
+    groups.set(file.adapter, group);
+  }
+
+  return groups;
+}
+
 async function writeChangedFiles(
   connection: Connection,
-  files: readonly HashedLuaFile[],
+  files: readonly HashedProjectFile[],
   options: SyncProjectOptions,
 ): Promise<void> {
   for (const [index, file] of files.entries()) {
-    const parsed = getLanguageAdapter().parseFile(file.file.path, file.content);
+    const parsed = file.adapter.parseFile(file.file.path, file.content);
 
     await insertFile(connection, file, parsed.symbols.length);
 
@@ -202,7 +239,7 @@ function reportProgress(options: SyncProjectOptions, message: string): void {
 
 async function insertFile(
   connection: Connection,
-  file: HashedLuaFile,
+  file: HashedProjectFile,
   nodeCount: number,
 ): Promise<void> {
   const now = new Date();

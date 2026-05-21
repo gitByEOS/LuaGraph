@@ -11,7 +11,7 @@ export type SchemaStatement = {
   readonly cypher: string;
 };
 
-export type ScannedLuaFile = {
+export type ScannedProjectFile = {
   readonly path: NormalizedPath;
   readonly size: number;
   readonly modifiedAt: Date;

@@ -203,8 +203,8 @@ describe("syncProject", () => {
 
     expect(messages).toEqual(
       expect.arrayContaining([
-        "开始扫描 Lua 文件",
-        "扫描到 1 个 Lua 文件",
+        "开始扫描项目文件",
+        "扫描到 1 个项目文件",
         "开始对比 contentHash",
         "待刷新 1 个文件，待删除 0 个文件",
         "同步文件[1/1] player.lua",

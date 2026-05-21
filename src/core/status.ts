@@ -5,10 +5,10 @@ import { join, resolve } from "node:path";
 import { Connection, Database, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
-import { scanLuaFiles } from "./scanner.js";
+import { scanProjectFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
 import type { NormalizedPath } from "../ast/types.js";
-import type { ScannedLuaFile, StatusResult } from "./project-types.js";
+import type { ScannedProjectFile, StatusResult } from "./project-types.js";
 
 export async function getProjectStatus(projectRoot: string): Promise<StatusResult> {
   const resolvedProjectRoot = resolve(projectRoot);
@@ -22,7 +22,7 @@ export async function getProjectStatus(projectRoot: string): Promise<StatusResul
 
   const databaseDir = resolve(resolvedProjectRoot, config.databaseDir);
   const databasePath = getKuzuDatabasePath(databaseDir);
-  const files = await scanLuaFiles(resolvedProjectRoot, config);
+  const files = await scanProjectFiles(resolvedProjectRoot, config);
   const baseStatus = {
     databaseDir,
     configPath: join(resolvedProjectRoot, configPath),
@@ -135,7 +135,7 @@ async function queryRows(connection: Connection, cypher: string): Promise<Record
 
 async function countPendingSyncChanges(
   projectRoot: string,
-  files: readonly ScannedLuaFile[],
+  files: readonly ScannedProjectFile[],
   indexedFileHashes: ReadonlyMap<NormalizedPath, string>,
 ): Promise<number> {
   const currentFileHashes = await createCurrentFileHashes(projectRoot, files);
@@ -151,7 +151,7 @@ async function countPendingSyncChanges(
 
 async function createCurrentFileHashes(
   projectRoot: string,
-  files: readonly ScannedLuaFile[],
+  files: readonly ScannedProjectFile[],
 ): Promise<Map<NormalizedPath, string>> {
   const entries = await Promise.all(
     files.map(async (file) => {

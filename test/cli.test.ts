@@ -155,9 +155,9 @@ describe("luagraph index CLI", () => {
     });
     expect(error.mock.calls.map((call) => String(call[0]))).toEqual(
       expect.arrayContaining([
-        "[index] 开始扫描 Lua 文件",
-        "[index] 扫描到 1 个 Lua 文件",
-        "[index] 开始索引 Lua 符号",
+        "[index] 开始扫描项目文件",
+        "[index] 扫描到 1 个项目文件",
+        "[index] 开始索引项目符号",
         "[index] 索引文件[1/1] player.lua ...",
         "[index] 完成统计：文件 1，符号 2，Contains 2，Calls 0，Extends 0，Requires 0",
       ]),
@@ -214,8 +214,8 @@ describe("luagraph sync CLI", () => {
     });
     expect(error.mock.calls.map((call) => String(call[0]))).toEqual(
       expect.arrayContaining([
-        "[sync] 开始扫描 Lua 文件",
-        "[sync] 扫描到 1 个 Lua 文件",
+        "[sync] 开始扫描项目文件",
+        "[sync] 扫描到 1 个项目文件",
         "[sync] 开始对比 contentHash",
         "[sync] 待刷新 1 个文件，待删除 0 个文件",
         "[sync] 同步文件[1/1] player.lua",

@@ -6,8 +6,17 @@ import type { LuaGraphConfig } from "./project-types.js";
 export const configPath = ".luagraph/config.json";
 
 export const defaultConfig: LuaGraphConfig = {
-  include: ["**/*.lua"],
-  exclude: [".luagraph/**"],
+  include: ["**/*.lua", "**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"],
+  exclude: [
+    ".luagraph/**",
+    "**/*.d.ts",
+    "node_modules/",
+    "dist/",
+    "build/",
+    "coverage/",
+    ".next/",
+    ".vite/",
+  ],
   databaseDir: ".luagraph/kuzu",
 };
 
@@ -70,7 +79,7 @@ export function validateConfig(config: unknown): LuaGraphConfig {
 
   return {
     include,
-    exclude: uniquePatterns([".luagraph/**", ...exclude]),
+    exclude: uniquePatterns([...defaultConfig.exclude, ...exclude]),
     databaseDir: config.databaseDir,
   };
 }

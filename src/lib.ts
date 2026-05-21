@@ -18,7 +18,7 @@ export { extractLuaSymbols, parseLuaFile } from "./ast/lua/parser.js";
 export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./core/path.js";
 export { queryProject, type QueryProjectOptions } from "./core/query.js";
 export { sampleProject, type SampleProjectOptions } from "./core/sample.js";
-export { scanLuaFiles } from "./core/scanner.js";
+export { scanProjectFiles } from "./core/scanner.js";
 export { startServer, type ServerHandle, type ServerOptions } from "./web/server.js";
 export { getProjectStatus } from "./core/status.js";
 export { getKuzuDatabasePath, initializeStore, schemaStatements } from "./core/store.js";
@@ -50,6 +50,6 @@ export type {
   SampleResult,
   SampleSymbol,
   SchemaStatement,
-  ScannedLuaFile,
+  ScannedProjectFile,
   StatusResult,
 } from "./core/project-types.js";

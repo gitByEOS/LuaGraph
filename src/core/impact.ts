@@ -157,7 +157,17 @@ async function queryInputFilePaths(
 }
 
 function looksLikeFilePath(input: string): boolean {
-  return input.endsWith(".lua") || input.includes("/") || input.includes("\\");
+  return isSupportedFilePath(input) || input.includes("/") || input.includes("\\");
+}
+
+function isSupportedFilePath(input: string): boolean {
+  return (
+    input.endsWith(".lua") ||
+    input.endsWith(".js") ||
+    input.endsWith(".jsx") ||
+    input.endsWith(".ts") ||
+    input.endsWith(".tsx")
+  );
 }
 
 function normalizeInputPathQuery(projectRoot: string, input: string): string {

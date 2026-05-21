@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createProjectConfig, readConfig, validateConfig, writeConfig } from "../src/core/config.js";
+import { createProjectConfig, defaultConfig, readConfig, validateConfig, writeConfig } from "../src/core/config.js";
 import type { LuaGraphConfig } from "../src/core/project-types.js";
 
 const tempRoots: string[] = [];
@@ -30,8 +30,8 @@ describe("config", () => {
     );
 
     expect(config).toEqual({
-      include: ["**/*.lua"],
-      exclude: [".luagraph/**", "node_modules/", "build/**"],
+      include: defaultConfig.include,
+      exclude: [...defaultConfig.exclude, "build/**"],
       databaseDir: ".luagraph/kuzu",
     });
     expect(writtenConfig).toEqual(config);
@@ -41,8 +41,8 @@ describe("config", () => {
     const projectRoot = await createTempProject();
 
     await expect(createProjectConfig(projectRoot)).resolves.toEqual({
-      include: ["**/*.lua"],
-      exclude: [".luagraph/**"],
+      include: defaultConfig.include,
+      exclude: defaultConfig.exclude,
       databaseDir: ".luagraph/kuzu",
     });
   });
@@ -65,9 +65,15 @@ describe("config", () => {
     const config = await writeConfig(projectRoot);
     const writtenText = await readFile(join(projectRoot, ".luagraph/config.json"), "utf8");
 
-    expect(config).toEqual(existingConfig);
+    expect(config).toEqual({
+      ...existingConfig,
+      exclude: [...defaultConfig.exclude, "vendor/**"],
+    });
     expect(writtenText).toBe(`${JSON.stringify(existingConfig)}\n`);
-    await expect(readConfig(projectRoot)).resolves.toEqual(existingConfig);
+    await expect(readConfig(projectRoot)).resolves.toEqual({
+      ...existingConfig,
+      exclude: [...defaultConfig.exclude, "vendor/**"],
+    });
   });
 
   it("rejects invalid include and exclude", () => {

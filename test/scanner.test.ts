@@ -4,12 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { scanLuaFiles } from "../src/core/scanner.js";
+import { defaultConfig } from "../src/core/config.js";
+import { scanProjectFiles } from "../src/core/scanner.js";
 import type { LuaGraphConfig } from "../src/core/project-types.js";
 
 const tempRoots: string[] = [];
 
-describe("scanLuaFiles", () => {
+describe("scanProjectFiles", () => {
   afterEach(async () => {
     await Promise.all(
       tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -23,7 +24,7 @@ describe("scanLuaFiles", () => {
     await writeProjectFile(projectRoot, "scripts/run.lua", "return 3\n");
     await writeProjectFile(projectRoot, "src/readme.txt", "not lua\n");
 
-    const files = await scanLuaFiles(projectRoot, createConfig(["src/**/*.lua"], []));
+    const files = await scanProjectFiles(projectRoot, createConfig(["src/**/*.lua"], []));
 
     expect(files.map((file) => file.path)).toEqual(["src/main.lua", "src/nested/util.lua"]);
     expect(files[0]?.size).toBe(Buffer.byteLength("return 1\n"));
@@ -38,7 +39,7 @@ describe("scanLuaFiles", () => {
     await writeProjectFile(projectRoot, "vendor/node_modules/pkg/dep.lua", "return 4\n");
     await writeProjectFile(projectRoot, "build/output.lua", "return 5\n");
 
-    const files = await scanLuaFiles(
+    const files = await scanProjectFiles(
       projectRoot,
       createConfig(["**/*.lua"], [".luagraph/**", "node_modules/", "build/**"]),
     );
@@ -50,19 +51,33 @@ describe("scanLuaFiles", () => {
     const projectRoot = await createTempProject();
     await writeProjectFile(projectRoot, "game/play/round.lua", "return 1\n");
 
-    const files = await scanLuaFiles(projectRoot, createConfig(["game/**/*.lua"], []));
+    const files = await scanProjectFiles(projectRoot, createConfig(["game/**/*.lua"], []));
 
     expect(files).toHaveLength(1);
     expect(files[0]?.path).toBe("game/play/round.lua");
   });
 
   it("counts LuaGraph Systems lua files without reading file contents", async () => {
-    const files = await scanLuaFiles(
+    const files = await scanProjectFiles(
       "/Users/bole/dev/mul-agents/LuaGraph",
       createConfig(["Systems/**/*.lua"], [".luagraph/**"]),
     );
 
     expect(files).toHaveLength(18);
+  });
+
+  it("uses default project rules for Lua and JS/TS files", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "src/main.lua", "return 1\n");
+    await writeProjectFile(projectRoot, "src/view.jsx", "export default null;\n");
+    await writeProjectFile(projectRoot, "src/app.ts", "export const app = 1;\n");
+    await writeProjectFile(projectRoot, "src/types.d.ts", "declare const app: number;\n");
+    await writeProjectFile(projectRoot, "node_modules/pkg/index.ts", "export const dep = 1;\n");
+    await writeProjectFile(projectRoot, "dist/bundle.js", "export const bundle = 1;\n");
+
+    const files = await scanProjectFiles(projectRoot, defaultConfig);
+
+    expect(files.map((file) => file.path)).toEqual(["src/app.ts", "src/main.lua", "src/view.jsx"]);
   });
 });
 

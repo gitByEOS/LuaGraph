@@ -3,15 +3,17 @@ import nodePath from "node:path";
 
 import { normalizeRepositoryPath } from "./path.js";
 import type { NormalizedPath } from "../ast/types.js";
-import type { LuaGraphConfig, ScannedLuaFile } from "./project-types.js";
+import type { LuaGraphConfig, ScannedProjectFile } from "./project-types.js";
 
-export async function scanLuaFiles(
+const supportedProjectFileExtensions = new Set([".lua", ".js", ".jsx", ".ts", ".tsx"]);
+
+export async function scanProjectFiles(
   projectRoot: string,
   config: LuaGraphConfig,
-): Promise<ScannedLuaFile[]> {
+): Promise<ScannedProjectFile[]> {
   const includeMatcher = createPatternMatcher(config.include);
   const excludeMatcher = createPatternMatcher(config.exclude);
-  const files: ScannedLuaFile[] = [];
+  const files: ScannedProjectFile[] = [];
 
   await scanDirectory("");
 
@@ -32,7 +34,7 @@ export async function scanLuaFiles(
         continue;
       }
 
-      if (!entry.isFile() || !relativePath.endsWith(".lua") || excludeMatcher(relativePath)) {
+      if (!entry.isFile() || !isSupportedProjectFile(relativePath) || excludeMatcher(relativePath)) {
         continue;
       }
 
@@ -139,6 +141,10 @@ function toSegmentRegexSource(patternSegment: string): string {
 
 function normalizePattern(pattern: string): string {
   return pattern.replaceAll("\\", "/").replaceAll(/\/+/g, "/").replace(/^\.\//, "");
+}
+
+function isSupportedProjectFile(path: NormalizedPath): boolean {
+  return supportedProjectFileExtensions.has(nodePath.extname(path)) && !path.endsWith(".d.ts");
 }
 
 function toRepositoryPath(relativeDirectory: string, entryName: string): NormalizedPath {
