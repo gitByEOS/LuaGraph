@@ -44,7 +44,7 @@ async function insertCallsRelationships(
   for (const file of files) {
     for (const call of file.calls) {
       const source = findCallerSymbol(file.symbols, call);
-      const target = resolveCallTarget(file, call, symbolIndex);
+      const target = source === undefined ? undefined : resolveCallTarget(file, source, call, symbolIndex);
 
       if (source === undefined || target === undefined) {
         continue;
@@ -108,12 +108,32 @@ function createClassesByNameMap(symbols: readonly ParsedSymbol[]): ReadonlyMap<s
 
 function resolveCallTarget(
   file: ParsedCallGraphFile,
+  source: ParsedSymbol,
   call: ParsedCall,
   symbolIndex: SymbolIndex,
 ): ParsedSymbol | undefined {
+  const selfMethodTarget = resolveSelfMethodTarget(file, source, call, symbolIndex);
   const constructorTarget = resolveConstructorTarget(file, call, symbolIndex);
 
-  return constructorTarget ?? symbolIndex.uniqueSymbols.get(call.calleeQualifiedName);
+  return selfMethodTarget ?? constructorTarget ?? symbolIndex.uniqueSymbols.get(call.calleeQualifiedName);
+}
+
+function resolveSelfMethodTarget(
+  file: ParsedCallGraphFile,
+  source: ParsedSymbol,
+  call: ParsedCall,
+  symbolIndex: SymbolIndex,
+): ParsedSymbol | undefined {
+  const methodName = getSelfMethodName(call.calleeQualifiedName);
+  const className = getSourceClassName(source.qualifiedName);
+
+  if (methodName === undefined || className === undefined) {
+    return undefined;
+  }
+
+  const qualifiedName = `${className}:${methodName}`;
+
+  return findSingleMethod(file.symbols, qualifiedName) ?? symbolIndex.uniqueSymbols.get(qualifiedName);
 }
 
 function resolveConstructorTarget(
@@ -145,6 +165,24 @@ function findSingleClass(symbols: readonly ParsedSymbol[], className: string): P
   const classes = symbols.filter((symbol) => symbol.kind === "class" && symbol.qualifiedName === className);
 
   return classes.length === 1 ? classes[0] : undefined;
+}
+
+function findSingleMethod(symbols: readonly ParsedSymbol[], qualifiedName: string): ParsedSymbol | undefined {
+  const methods = symbols.filter((symbol) => symbol.kind === "method" && symbol.qualifiedName === qualifiedName);
+
+  return methods.length === 1 ? methods[0] : undefined;
+}
+
+function getSelfMethodName(calleeQualifiedName: string): string | undefined {
+  const match = /^self:(?<methodName>[A-Za-z_][A-Za-z0-9_]*)$/.exec(calleeQualifiedName);
+
+  return match?.groups?.methodName;
+}
+
+function getSourceClassName(sourceQualifiedName: string): string | undefined {
+  const separatorIndex = sourceQualifiedName.lastIndexOf(":");
+
+  return separatorIndex <= 0 ? undefined : sourceQualifiedName.slice(0, separatorIndex);
 }
 
 function findCallerSymbol(symbols: readonly ParsedSymbol[], call: ParsedCall): ParsedSymbol | undefined {

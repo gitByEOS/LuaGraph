@@ -216,10 +216,14 @@ describe("graph output formatters", () => {
     expect(output).toContain("- symbols: 4");
     expect(output).toContain("- calls: 2");
     expect(output).toContain("- requires: 2");
+    expect(output).toContain("## Internal Logic");
+    expect(output).not.toContain("## Main Logic");
     expect(output).toContain("- reason: exported");
-    expect(output).toContain("- reason: low-inbound");
-    expect(output).toContain("- luagraph explain boot --depth 2");
-    expect(output).toContain("- luagraph query callees:boot --depth 2 --format tree");
+    expect(output).toContain("- reason: external-call");
+    expect(output).not.toContain("commands:");
+    expect(output).not.toContain("luagraph explain boot --depth 2");
+    expect(output).not.toContain("luagraph query callees:boot --depth 2 --format tree");
+    expect(output).not.toContain("luagraph explain ");
     expect(output).toContain("1. boot");
     expect(output).toContain("   - calls: helper, externalHelper");
     expect(output).toContain("     - flag -> boot");
@@ -234,6 +238,50 @@ describe("graph output formatters", () => {
     expect(output).not.toContain("safeConclusion");
     expect(output).not.toContain("nextQueries");
     expect(output).not.toContain("externalGaps:");
+  });
+
+  it("explain text 超过 20 个入口时显示省略", () => {
+    const output = formatExplainResult(
+      {
+        ...createExplainResult(),
+        entrypoints: Array.from({ length: 21 }, (_, index) => ({
+          name: `entry${index}`,
+          qualifiedName: `entry${index}`,
+          kind: "function",
+          filePath: "src/main.lua",
+          startLine: index + 1,
+          isExported: true,
+          externalCallCount: 0,
+        })),
+      },
+      "text",
+    );
+
+    expect(output).toContain("- entry19");
+    expect(output).not.toContain("- entry20");
+    expect(output).toContain("- ...");
+  });
+
+  it("explain text 空态使用 None", () => {
+    const output = formatExplainResult(
+      {
+        ...createExplainResult(),
+        entrypoints: [],
+        flow: [],
+        branches: [],
+        dependencies: [],
+        dataFlow: [],
+        externalGaps: [],
+      },
+      "text",
+    );
+
+    expect(output).toContain("## Entry Points\n- None");
+    expect(output).toContain("## Internal Logic\n1. None");
+    expect(output).toContain("## Data Flow\n- None");
+    expect(output).toContain("## External Contracts\n- None");
+    expect(output).toContain("## Unresolved Runtime\n- None");
+    expect(output).not.toContain("无");
   });
 });
 
@@ -409,7 +457,7 @@ function createExplainResult(): LuaGraphExplainResult {
         filePath: "src/main.lua",
         startLine: 9,
         isExported: false,
-        externalCallCount: 0,
+        externalCallCount: 1,
       },
     ],
     flow: [

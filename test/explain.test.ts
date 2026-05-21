@@ -127,6 +127,106 @@ describe("explainProject", () => {
     ]);
     expect(result.externalGaps).toContain("未解析 require/import: ./missing");
   });
+
+  it("JS/TS 文件入口保留低入度函数", async () => {
+    const projectRoot = await createTempProject();
+    await writeSource(
+      projectRoot,
+      "src/main.ts",
+      [
+        "export function boot() {",
+        "  return internal();",
+        "}",
+        "function internal() {",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await explainProject(projectRoot, "src/main.ts");
+
+    expect(result.entrypoints.map((entrypoint) => entrypoint.qualifiedName)).toEqual(["boot", "internal"]);
+  });
+
+  it("Lua method 不因非 local 自动成为文件入口", async () => {
+    const projectRoot = await createTempProject();
+    await writeSource(
+      projectRoot,
+      "src/control.lua",
+      [
+        'SlotsControl = class("SlotsControl")',
+        "function SlotsControl:isActive()",
+        "  return true",
+        "end",
+        "function SlotsControl:getInstance()",
+        "  return self",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const fileResult = await explainProject(projectRoot, "src/control.lua");
+    const symbolResult = await explainProject(projectRoot, "SlotsControl:isActive");
+
+    expect(fileResult.entrypoints.map((entrypoint) => entrypoint.qualifiedName)).toEqual([]);
+    expect(symbolResult.entrypoints.map((entrypoint) => entrypoint.qualifiedName)).toEqual([
+      "SlotsControl:isActive",
+    ]);
+  });
+
+  it("Lua self 方法调用按所在 class 建 Calls 边", async () => {
+    const projectRoot = await createTempProject();
+    await writeSource(
+      projectRoot,
+      "src/control.lua",
+      [
+        'SlotsControl = class("SlotsControl")',
+        'OtherControl = class("OtherControl")',
+        "function SlotsControl:ctor()",
+        "  self:_initData()",
+        "end",
+        "function SlotsControl:_initData()",
+        "  return 1",
+        "end",
+        "function OtherControl:ctor()",
+        "  self:_initData()",
+        "end",
+        "function OtherControl:_initData()",
+        "  return 2",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const fileResult = await explainProject(projectRoot, "src/control.lua", { depth: 1 });
+    const classResult = await explainProject(projectRoot, "SlotsControl", { depth: 1 });
+    const slotsResult = await explainProject(projectRoot, "SlotsControl:ctor", { depth: 1 });
+    const otherResult = await explainProject(projectRoot, "OtherControl:ctor", { depth: 1 });
+
+    expect(fileResult.entrypoints.map((entrypoint) => entrypoint.qualifiedName)).toEqual([
+      "SlotsControl:ctor",
+      "OtherControl:ctor",
+    ]);
+    expect(classResult.entrypoints.map((entrypoint) => entrypoint.qualifiedName)).toEqual([
+      "SlotsControl:ctor",
+    ]);
+    expect(slotsResult.flow.find((item) => item.entrypoint === "SlotsControl:ctor")?.calls).toEqual([
+      expect.objectContaining({
+        from: "SlotsControl:ctor",
+        to: "SlotsControl:_initData",
+      }),
+    ]);
+    expect(otherResult.flow.find((item) => item.entrypoint === "OtherControl:ctor")?.calls).toEqual([
+      expect.objectContaining({
+        from: "OtherControl:ctor",
+        to: "OtherControl:_initData",
+      }),
+    ]);
+  });
 });
 
 async function createLuaProject(): Promise<string> {

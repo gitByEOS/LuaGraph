@@ -13,7 +13,7 @@ LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提
 | Core 产品层 | `src/core/*`                               | 已完成 |
 | AST 中间层  | `src/ast/types.ts`, `src/ast/registry.ts`  | 已完成 |
 | Lua 适配器  | `src/ast/lua/*`                            | 已完成 |
-| JS/TS 预留  | `src/ast/javascript/README.md`, `src/ast/typescript/README.md` | 已占位 |
+| JS/TS 适配器 | `src/ast/js/*`                            | 已完成 |
 | Web 服务    | `src/web/server.ts`, `src/web/assets/*`    | 已完成 |
 | v0.4 解析准确性 | `src/ast/lua/parser.ts`, `test/parser.test.ts` | 已完成 (行级模式，含函数作用域结束行和调用提取) |
 | v0.5 增量同步 | `src/core/syncer.ts`                    | 已完成 |
@@ -29,9 +29,9 @@ LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提
 - `src/cli/`：命令装配、浏览器打开和 query/impact 输出格式。
 - `src/lib.ts`：公共库出口，聚合 core 与 AST 必要类型。
 - `src/ast/types.ts`：语言无关中间表示，包含 `ParsedFile`、`ParsedSymbol`、`ParsedCall`、`ParsedExtend`、`ParsedRequire`。
-- `src/ast/registry.ts`：语言适配器统一入口；当前固定返回 Lua 适配器。
+- `src/ast/registry.ts`：语言适配器统一入口，按扩展名返回 Lua 或 JS/TS 适配器。
 - `src/ast/lua/`：Lua 行级解析、Calls/Extends/Requires 关系重建与相关边删除。
-- `src/ast/javascript/`、`src/ast/typescript/`：后续语言适配器占位说明，不含假实现。
+- `src/ast/js/`：JS/TS 解析、Calls/Extends/Requires 关系重建与相关边删除。
 - `src/core/`：配置、路径、扫描、初始化、索引、同步、查询、影响分析、状态、存储和代码片段读取。
 - `src/core/project-types.ts`：配置、命令结果、查询节点、状态等产品层类型。
 - `src/web/server.ts`：内置 HTTP 服务，提供 `/api/status`、`/api/graph`、`/api/code`。

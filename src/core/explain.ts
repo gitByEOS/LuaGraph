@@ -178,15 +178,13 @@ async function createEntrypoints(
 
   const candidates = symbols
     .filter((symbol) => symbol.kind === "function" || symbol.kind === "method")
-    .filter((symbol) => symbol.isExported || (counts.get(symbol.id) ?? 0) <= 1);
-  const fallback = symbols.filter((symbol) => symbol.kind === "function" || symbol.kind === "method");
+    .filter((symbol) => isExplicitEntrypoint(symbol, counts.get(symbol.id) ?? 0));
+  const constructors = findClassConstructors(symbols);
   const selected = uniqueSymbols(
     target.type === "symbol"
-      ? [target.symbol, ...candidates]
-      : candidates.length > 0
-        ? candidates
-        : fallback,
-  ).slice(0, 8);
+      ? [...getTargetEntrypointSymbols(target.symbol), ...findTargetConstructors(constructors, target.symbol), ...candidates]
+      : [...constructors, ...candidates],
+  ).slice(0, 21);
 
   return selected.map((symbol) => ({
     name: symbol.name,
@@ -197,6 +195,60 @@ async function createEntrypoints(
     isExported: symbol.isExported,
     externalCallCount: counts.get(symbol.id) ?? 0,
   }));
+}
+
+function isExplicitEntrypoint(symbol: ExplainSymbol, externalCallCount: number): boolean {
+  return (
+    externalCallCount > 0 ||
+    (symbol.isExported && symbol.kind === "function") ||
+    isJavaScriptLowInboundEntrypoint(symbol, externalCallCount)
+  );
+}
+
+function isJavaScriptLowInboundEntrypoint(symbol: ExplainSymbol, externalCallCount: number): boolean {
+  return isJavaScriptLikeFilePath(symbol.filePath) && externalCallCount <= 1;
+}
+
+function isJavaScriptLikeFilePath(filePath: string): boolean {
+  const extension = nodePath.posix.extname(filePath);
+
+  return extension === ".js" || extension === ".jsx" || extension === ".ts" || extension === ".tsx";
+}
+
+function getTargetEntrypointSymbols(symbol: ExplainSymbol): readonly ExplainSymbol[] {
+  return symbol.kind === "function" || symbol.kind === "method" ? [symbol] : [];
+}
+
+function findClassConstructors(symbols: readonly ExplainSymbol[]): ExplainSymbol[] {
+  const classNames = new Set(
+    symbols
+      .filter((symbol) => symbol.kind === "class" || symbol.kind === "table")
+      .map((symbol) => symbol.qualifiedName),
+  );
+
+  return symbols.filter(
+    (symbol) =>
+      symbol.kind === "method" &&
+      symbol.name === "ctor" &&
+      classNames.has(readMethodOwner(symbol.qualifiedName)),
+  );
+}
+
+function findTargetConstructors(
+  constructors: readonly ExplainSymbol[],
+  target: ExplainSymbol,
+): readonly ExplainSymbol[] {
+  if (target.kind !== "class" && target.kind !== "table") {
+    return [];
+  }
+
+  return constructors.filter((symbol) => readMethodOwner(symbol.qualifiedName) === target.qualifiedName);
+}
+
+function readMethodOwner(qualifiedName: string): string {
+  const separatorIndex = Math.max(qualifiedName.lastIndexOf(":"), qualifiedName.lastIndexOf("."));
+
+  return separatorIndex <= 0 ? "" : qualifiedName.slice(0, separatorIndex);
 }
 
 async function createFlow(
@@ -623,7 +675,7 @@ function isSupportedFilePath(input: string): boolean {
 }
 
 function uniqueSymbols(symbols: readonly ExplainSymbol[]): ExplainSymbol[] {
-  return sortSymbols([...new Map(symbols.map((symbol) => [symbol.id, symbol])).values()]);
+  return [...new Map(symbols.map((symbol) => [symbol.id, symbol])).values()];
 }
 
 function sortSymbols(symbols: readonly ExplainSymbol[]): ExplainSymbol[] {

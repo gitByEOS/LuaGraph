@@ -50,7 +50,7 @@ const symbolJson = JSON.parse(process.argv[4]);
 const requiredTitles = [
   "## Overview",
   "## Entry Points",
-  "## Main Logic",
+  "## Internal Logic",
   "## Data Flow",
   "## External Contracts",
   "## Unresolved Runtime",
@@ -76,15 +76,27 @@ if (
   fileText.includes("entrypoints:") ||
   fileText.includes("externalGaps:") ||
   fileText.includes("safeConclusion") ||
-  fileText.includes("nextQueries")
+  fileText.includes("nextQueries") ||
+  fileText.includes("## Main Logic") ||
+  fileText.includes("commands:") ||
+  fileText.includes("luagraph explain main --depth") ||
+  fileText.includes("luagraph query callees:main") ||
+  symbolText.includes("## Main Logic") ||
+  symbolText.includes("commands:") ||
+  symbolText.includes("luagraph explain main --depth") ||
+  symbolText.includes("luagraph query callees:main")
 ) {
   fail("text 输出仍包含旧格式或噪音字段");
 }
 
-for (const content of ["- file: src/main.lua", "- reason: exported", "- reason: selected-symbol", "luagraph explain main --depth 2", "luagraph query callees:main --depth 2 --format tree", "- calls: helper, fallback"]) {
+for (const content of ["- file: src/main.lua", "- reason: exported", "- reason: selected-symbol", "- calls: helper, fallback"]) {
   if (!fileText.includes(content) && !symbolText.includes(content)) {
     fail(`text 输出缺少关键内容 ${content}`);
   }
+}
+
+if (!fileText.includes("None") || !symbolText.includes("None")) {
+  fail("text 空态没有输出 None");
 }
 
 if (
