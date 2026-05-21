@@ -145,3 +145,70 @@ export type LuaGraphImpactResult = {
   readonly files: readonly string[];
   readonly edges: readonly QueryEdge[];
 };
+
+export type ExplainTarget = {
+  readonly type: "file" | "symbol";
+  readonly name: string;
+  readonly filePath: string;
+  readonly startLine?: number;
+};
+
+export type ExplainEntrypoint = {
+  readonly name: string;
+  readonly qualifiedName: string;
+  readonly kind: string;
+  readonly filePath: string;
+  readonly startLine: number;
+  readonly isExported: boolean;
+  readonly externalCallCount: number;
+};
+
+export type ExplainFlowCall = {
+  readonly from: string;
+  readonly to: string;
+  readonly filePath: string;
+  readonly line: number;
+  readonly isResolved: boolean;
+  readonly calls: readonly ExplainFlowCall[];
+};
+
+export type ExplainFlow = {
+  readonly entrypoint: string;
+  readonly filePath: string;
+  readonly calls: readonly ExplainFlowCall[];
+};
+
+export type ExplainBranch = {
+  readonly functionName: string;
+  readonly line: number;
+  readonly kind: "if" | "elseif" | "switch" | "case" | "conditional";
+  readonly condition: string;
+};
+
+export type ExplainDependency = {
+  readonly moduleName: string;
+  readonly source: string;
+  readonly target: string;
+  readonly isResolved: boolean;
+};
+
+export type ExplainDataFlowStep = {
+  readonly order: number;
+  readonly label: string;
+  readonly source: "input" | "entrypoint" | "callee" | "return";
+  readonly filePath: string;
+  readonly line?: number;
+};
+
+export type LuaGraphExplainResult = {
+  readonly projectRoot: string;
+  readonly input: string;
+  readonly depth: number;
+  readonly target: ExplainTarget;
+  readonly entrypoints: readonly ExplainEntrypoint[];
+  readonly flow: readonly ExplainFlow[];
+  readonly branches: readonly ExplainBranch[];
+  readonly dependencies: readonly ExplainDependency[];
+  readonly dataFlow: readonly ExplainDataFlowStep[];
+  readonly externalGaps: readonly string[];
+};

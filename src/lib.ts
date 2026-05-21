@@ -13,6 +13,7 @@ export {
   writeConfig,
 } from "./core/config.js";
 export { indexProject, type IndexProjectOptions } from "./core/indexer.js";
+export { explainProject, type ExplainProjectOptions } from "./core/explain.js";
 export { createInitPlan, initializeProject } from "./core/init.js";
 export { extractLuaSymbols, parseLuaFile } from "./ast/lua/parser.js";
 export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./core/path.js";
@@ -40,6 +41,7 @@ export type {
   IndexResult,
   InitPlan,
   InitResult,
+  LuaGraphExplainResult,
   LuaGraphConfig,
   LuaGraphImpactResult,
   LuaGraphQueryResult,
