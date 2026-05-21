@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { formatImpactResult, formatQueryResult } from "../src/cli/format.js";
-import type { LuaGraphImpactResult, LuaGraphQueryResult } from "../src/core/project-types.js";
+import { formatExplainResult, formatImpactResult, formatQueryResult } from "../src/cli/format.js";
+import type { LuaGraphExplainResult, LuaGraphImpactResult, LuaGraphQueryResult } from "../src/core/project-types.js";
 
 describe("graph output formatters", () => {
   it("query json 输出保持可解析", () => {
@@ -206,6 +206,35 @@ describe("graph output formatters", () => {
       ].join("\n"),
     );
   });
+
+  it("explain text 使用固定 Markdown 模板", () => {
+    const output = formatExplainResult(createExplainResult(), "text");
+
+    expect(output).toContain("# Explain: src/main.lua");
+    expect(output).toContain("## Overview");
+    expect(output).toContain("- file: src/main.lua");
+    expect(output).toContain("- symbols: 4");
+    expect(output).toContain("- calls: 2");
+    expect(output).toContain("- requires: 2");
+    expect(output).toContain("- reason: exported");
+    expect(output).toContain("- reason: low-inbound");
+    expect(output).toContain("- luagraph explain boot --depth 2");
+    expect(output).toContain("- luagraph query callees:boot --depth 2 --format tree");
+    expect(output).toContain("1. boot");
+    expect(output).toContain("   - calls: helper, externalHelper");
+    expect(output).toContain("     - flag -> boot");
+    expect(output).toContain("- input src/main.lua");
+    expect(output).toContain("- entrypoint boot");
+    expect(output).toContain("- call helper");
+    expect(output).toContain("- utils");
+    expect(output).toContain("  - reason: project-dependency");
+    expect(output).toContain("- externalHelper");
+    expect(output).toContain("  - reason: cross-file-call");
+    expect(output).toContain("## Unresolved Runtime\n- missing");
+    expect(output).not.toContain("safeConclusion");
+    expect(output).not.toContain("nextQueries");
+    expect(output).not.toContain("externalGaps:");
+  });
 });
 
 function createQueryResult(): LuaGraphQueryResult {
@@ -349,6 +378,119 @@ function createExtendsImpactResult(): LuaGraphImpactResult {
     edges: [
       createExtendsEdge(child.id, base.id),
       createExtendsEdge(grandChild.id, child.id),
+    ],
+  };
+}
+
+function createExplainResult(): LuaGraphExplainResult {
+  return {
+    projectRoot: "/tmp/project",
+    input: "src/main.lua",
+    depth: 2,
+    target: {
+      type: "file",
+      name: "main.lua",
+      filePath: "src/main.lua",
+    },
+    entrypoints: [
+      {
+        name: "boot",
+        qualifiedName: "boot",
+        kind: "function",
+        filePath: "src/main.lua",
+        startLine: 3,
+        isExported: true,
+        externalCallCount: 0,
+      },
+      {
+        name: "fallback",
+        qualifiedName: "fallback",
+        kind: "function",
+        filePath: "src/main.lua",
+        startLine: 9,
+        isExported: false,
+        externalCallCount: 0,
+      },
+    ],
+    flow: [
+      {
+        entrypoint: "boot",
+        filePath: "src/main.lua",
+        calls: [
+          {
+            from: "boot",
+            to: "helper",
+            filePath: "src/main.lua",
+            line: 5,
+            isResolved: true,
+            calls: [],
+          },
+          {
+            from: "boot",
+            to: "externalHelper",
+            filePath: "src/utils.lua",
+            line: 6,
+            isResolved: true,
+            calls: [],
+          },
+        ],
+      },
+    ],
+    branches: [
+      {
+        functionName: "boot",
+        line: 4,
+        kind: "if",
+        condition: "flag",
+      },
+    ],
+    dependencies: [
+      {
+        moduleName: "missing",
+        source: "src/main.lua",
+        target: "src/main.lua",
+        isResolved: false,
+      },
+      {
+        moduleName: "utils",
+        source: "src/main.lua",
+        target: "src/utils.lua",
+        isResolved: true,
+      },
+    ],
+    dataFlow: [
+      {
+        order: 1,
+        label: "input:src/main.lua",
+        source: "input",
+        filePath: "src/main.lua",
+      },
+      {
+        order: 2,
+        label: "入口 boot",
+        source: "entrypoint",
+        filePath: "src/main.lua",
+        line: 3,
+      },
+      {
+        order: 3,
+        label: "调用 helper",
+        source: "callee",
+        filePath: "src/main.lua",
+        line: 5,
+      },
+      {
+        order: 4,
+        label: "return result",
+        source: "return",
+        filePath: "src/main.lua",
+        line: 8,
+      },
+    ],
+    externalGaps: [
+      "外部依赖需查看: utils -> src/utils.lua",
+      "外部函数需查看: externalHelper -> src/utils.lua",
+      "未解析 require/import: missing",
     ],
   };
 }

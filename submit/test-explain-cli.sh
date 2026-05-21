@@ -47,16 +47,43 @@ const fileText = process.argv[1];
 const fileJson = JSON.parse(process.argv[2]);
 const symbolText = process.argv[3];
 const symbolJson = JSON.parse(process.argv[4]);
-const requiredTitles = ["target:", "entrypoints:", "flow:", "branches:", "dependencies:", "dataFlow:", "externalGaps:"];
+const requiredTitles = [
+  "## Overview",
+  "## Entry Points",
+  "## Main Logic",
+  "## Data Flow",
+  "## External Contracts",
+  "## Unresolved Runtime",
+];
 const fail = (reason) => {
   console.error(`explain CLI 验收失败: ${reason}`);
   console.error(JSON.stringify({ fileText, fileJson, symbolText, symbolJson }, null, 2));
   process.exit(1);
 };
 
+if (!fileText.includes("# Explain: src/main.lua") || !symbolText.includes("# Explain: main")) {
+  fail("text 输出缺少 Explain 标题");
+}
+
 for (const title of requiredTitles) {
   if (!fileText.includes(title) || !symbolText.includes(title)) {
     fail(`text 输出缺少标题 ${title}`);
+  }
+}
+
+if (
+  fileText.includes("target:") ||
+  fileText.includes("entrypoints:") ||
+  fileText.includes("externalGaps:") ||
+  fileText.includes("safeConclusion") ||
+  fileText.includes("nextQueries")
+) {
+  fail("text 输出仍包含旧格式或噪音字段");
+}
+
+for (const content of ["- file: src/main.lua", "- reason: exported", "- reason: selected-symbol", "luagraph explain main --depth 2", "luagraph query callees:main --depth 2 --format tree", "- calls: helper, fallback"]) {
+  if (!fileText.includes(content) && !symbolText.includes(content)) {
+    fail(`text 输出缺少关键内容 ${content}`);
   }
 }
 

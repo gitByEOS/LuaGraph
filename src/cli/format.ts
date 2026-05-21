@@ -1,7 +1,6 @@
 import type {
   ExplainBranch,
   ExplainDataFlowStep,
-  ExplainDependency,
   ExplainEntrypoint,
   ExplainFlow,
   ExplainFlowCall,
@@ -48,15 +47,7 @@ export function formatExplainResult(result: LuaGraphExplainResult, format: Expla
     return JSON.stringify(result, null, 2);
   }
 
-  return [
-    `target: ${formatExplainTarget(result.target)}`,
-    `entrypoints: ${formatExplainEntrypoints(result.entrypoints)}`,
-    `flow: ${formatExplainFlows(result.flow)}`,
-    `branches: ${formatExplainBranches(result.branches)}`,
-    `dependencies: ${formatExplainDependencies(result.dependencies)}`,
-    `dataFlow: ${formatExplainDataFlow(result.dataFlow)}`,
-    `externalGaps: ${formatExplainExternalGaps(result.externalGaps)}`,
-  ].join("\n");
+  return formatExplainText(result);
 }
 
 function formatQueryTable(result: LuaGraphQueryResult): string {
@@ -232,73 +223,214 @@ function asciiWidth(value: string): number {
   return value.length;
 }
 
-function formatExplainTarget(target: ExplainTarget): string {
-  const location = target.startLine === undefined ? target.filePath : `${target.filePath}:${target.startLine}`;
+type ExplainEntrypointReason = "exported" | "external-call" | "selected-symbol" | "low-inbound";
+type ExplainContractReason = "project-dependency" | "cross-file-call";
 
-  return `${target.type} ${target.name} (${location})`;
+type ExplainExternalContract = {
+  readonly name: string;
+  readonly reason: ExplainContractReason;
+  readonly commandTarget: string;
+};
+
+function formatExplainText(result: LuaGraphExplainResult): string {
+  return [
+    `# Explain: ${formatExplainTitle(result.target)}`,
+    "",
+    "## Overview",
+    `- file: ${result.target.filePath}`,
+    `- symbols: ${countExplainSymbols(result)}`,
+    `- calls: ${flattenExplainFlows(result.flow).length}`,
+    `- requires: ${result.dependencies.length}`,
+    "",
+    "## Entry Points",
+    formatExplainEntrypointSection(result),
+    "",
+    "## Main Logic",
+    formatExplainMainLogic(result),
+    "",
+    "## Data Flow",
+    formatExplainDataFlowSection(result),
+    "",
+    "## External Contracts",
+    formatExplainExternalContracts(result),
+    "",
+    "## Unresolved Runtime",
+    formatExplainUnresolvedRuntime(result),
+  ].join("\n");
 }
 
-function formatExplainEntrypoints(entrypoints: readonly ExplainEntrypoint[]): string {
+function formatExplainTitle(target: ExplainTarget): string {
+  return target.type === "file" ? target.filePath : target.name;
+}
+
+function formatExplainEntrypointSection(result: LuaGraphExplainResult): string {
+  const entrypoints = result.entrypoints.slice(0, 5);
+
   if (entrypoints.length === 0) {
-    return "无";
+    return "- 无";
   }
 
-  return entrypoints.map((entrypoint) => entrypoint.qualifiedName).join(", ");
+  return entrypoints
+    .flatMap((entrypoint) => [
+      `- ${entrypoint.qualifiedName}`,
+      `  - reason: ${getExplainEntrypointReason(entrypoint, result.target)}`,
+      `  - line: ${entrypoint.startLine}`,
+      "  - commands:",
+      `    - luagraph explain ${entrypoint.qualifiedName} --depth ${result.depth}`,
+      `    - luagraph query callees:${entrypoint.qualifiedName} --depth ${result.depth} --format tree`,
+    ])
+    .join("\n");
 }
 
-function formatExplainFlows(flows: readonly ExplainFlow[]): string {
-  const paths = flows.flatMap((flow) => formatExplainFlowPaths(flow.entrypoint, flow.calls));
+function formatExplainMainLogic(result: LuaGraphExplainResult): string {
+  const flows = result.flow.slice(0, 5);
 
-  if (paths.length === 0) {
-    return flows.length === 0 ? "无" : flows.map((flow) => flow.entrypoint).join(", ");
+  if (flows.length === 0) {
+    return "1. 无";
   }
 
-  return paths.join("; ");
+  return flows
+    .flatMap((flow, index) => [
+      `${index + 1}. ${flow.entrypoint}`,
+      `   - calls: ${formatExplainCalls(flow.calls)}`,
+      ...formatExplainBranchLines(flow, result.branches),
+    ])
+    .join("\n");
 }
 
-function formatExplainFlowPaths(entrypoint: string, calls: readonly ExplainFlowCall[]): string[] {
-  if (calls.length === 0) {
-    return [entrypoint];
+function formatExplainBranchLines(flow: ExplainFlow, branches: readonly ExplainBranch[]): string[] {
+  const flowSymbols = new Set([flow.entrypoint, ...flattenExplainCalls(flow.calls).map((call) => call.to)]);
+  const matchedBranches = branches.filter((branch) => flowSymbols.has(branch.functionName)).slice(0, 5);
+
+  if (matchedBranches.length === 0) {
+    return [];
   }
 
-  return calls.flatMap((call) => {
-    const prefix = `${entrypoint} -> ${call.to}`;
-    const children = formatExplainFlowPaths(prefix, call.calls);
-
-    return children.length === 0 ? [prefix] : children;
-  });
+  return [
+    "   - branches:",
+    ...matchedBranches.map((branch) => `     - ${branch.condition} -> ${branch.functionName}`),
+  ];
 }
 
-function formatExplainBranches(branches: readonly ExplainBranch[]): string {
-  if (branches.length === 0) {
-    return "无";
+function formatExplainCalls(calls: readonly ExplainFlowCall[]): string {
+  const names = uniqueStrings(calls.map((call) => call.to)).slice(0, 5);
+
+  return names.length === 0 ? "无" : names.join(", ");
+}
+
+function formatExplainDataFlowSection(result: LuaGraphExplainResult): string {
+  if (result.dataFlow.length === 0) {
+    return "- 无";
   }
 
-  return branches
-    .map((branch) => `${branch.functionName} 第${branch.line}行按 ${branch.condition} 分到 ${branch.kind}`)
-    .join("; ");
+  return result.dataFlow.map((step) => `- ${formatExplainDataFlowStep(step, result.input)}`).join("\n");
 }
 
-function formatExplainDependencies(dependencies: readonly ExplainDependency[]): string {
-  if (dependencies.length === 0) {
-    return "无";
+function formatExplainDataFlowStep(step: ExplainDataFlowStep, input: string): string {
+  if (step.source === "input") {
+    return `input ${input}`;
   }
 
-  return dependencies
-    .map((dependency) => `${dependency.moduleName} -> ${dependency.target} resolved=${dependency.isResolved ? "true" : "false"}`)
-    .join(", ");
-}
-
-function formatExplainDataFlow(dataFlow: readonly ExplainDataFlowStep[]): string {
-  if (dataFlow.length === 0) {
-    return "无";
+  if (step.source === "entrypoint") {
+    return `entrypoint ${stripExplainDataFlowLabel(step.label, "入口")}`;
   }
 
-  return dataFlow.map((step) => step.label).join(" -> ");
+  if (step.source === "callee") {
+    return `call ${stripExplainDataFlowLabel(step.label, "调用")}`;
+  }
+
+  return step.label;
 }
 
-function formatExplainExternalGaps(externalGaps: readonly string[]): string {
-  return externalGaps.length === 0 ? "无" : externalGaps.join("; ");
+function formatExplainExternalContracts(result: LuaGraphExplainResult): string {
+  const contracts = getExplainExternalContracts(result);
+
+  if (contracts.length === 0) {
+    return "- 无";
+  }
+
+  return contracts
+    .flatMap((contract) => [
+      `- ${contract.name}`,
+      `  - reason: ${contract.reason}`,
+      `  - command: luagraph explain ${contract.commandTarget}`,
+    ])
+    .join("\n");
+}
+
+function formatExplainUnresolvedRuntime(result: LuaGraphExplainResult): string {
+  const unresolved = uniqueStrings([
+    ...result.dependencies.filter((dependency) => !dependency.isResolved).map((dependency) => dependency.moduleName),
+    ...flattenExplainFlows(result.flow).filter((call) => !call.isResolved).map((call) => call.to),
+  ]);
+
+  if (unresolved.length === 0) {
+    return "- 无";
+  }
+
+  return unresolved.map((name) => `- ${name}`).join("\n");
+}
+
+function getExplainEntrypointReason(entrypoint: ExplainEntrypoint, target: ExplainTarget): ExplainEntrypointReason {
+  if (target.type === "symbol" && entrypoint.qualifiedName === target.name) {
+    return "selected-symbol";
+  }
+
+  if (entrypoint.isExported) {
+    return "exported";
+  }
+
+  if (entrypoint.externalCallCount > 0) {
+    return "external-call";
+  }
+
+  return "low-inbound";
+}
+
+function getExplainExternalContracts(result: LuaGraphExplainResult): ExplainExternalContract[] {
+  const dependencyContracts = result.dependencies
+    .filter((dependency) => dependency.isResolved && dependency.target !== result.target.filePath)
+    .map((dependency) => ({
+      name: dependency.moduleName,
+      reason: "project-dependency" as const,
+      commandTarget: dependency.target,
+    }));
+  const callContracts = flattenExplainFlows(result.flow)
+    .filter((call) => call.isResolved && call.filePath !== result.target.filePath)
+    .map((call) => ({
+      name: call.to,
+      reason: "cross-file-call" as const,
+      commandTarget: call.to,
+    }));
+
+  return uniqueExplainContracts([...dependencyContracts, ...callContracts]).slice(0, 10);
+}
+
+function countExplainSymbols(result: LuaGraphExplainResult): number {
+  return uniqueStrings([
+    ...result.entrypoints.map((entrypoint) => entrypoint.qualifiedName),
+    ...flattenExplainFlows(result.flow).flatMap((call) => [call.from, call.to]),
+  ]).length;
+}
+
+function flattenExplainFlows(flows: readonly ExplainFlow[]): ExplainFlowCall[] {
+  return flows.flatMap((flow) => flattenExplainCalls(flow.calls));
+}
+
+function flattenExplainCalls(calls: readonly ExplainFlowCall[]): ExplainFlowCall[] {
+  return calls.flatMap((call) => [call, ...flattenExplainCalls(call.calls)]);
+}
+
+function stripExplainDataFlowLabel(label: string, prefix: string): string {
+  return label.startsWith(`${prefix} `) ? label.slice(prefix.length + 1) : label;
+}
+
+function uniqueExplainContracts(contracts: readonly ExplainExternalContract[]): ExplainExternalContract[] {
+  return [...new Map(contracts.map((contract) => [`${contract.reason}:${contract.name}:${contract.commandTarget}`, contract])).values()];
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function renderRelationTree(
