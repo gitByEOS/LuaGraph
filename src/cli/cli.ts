@@ -5,7 +5,8 @@ import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 
 import { openUrl } from "./browser.js";
-import { formatImpactResult, formatQueryResult, type GraphOutputFormat } from "./format.js";
+import { formatExplainResult, formatImpactResult, formatQueryResult, type ExplainOutputFormat, type GraphOutputFormat } from "./format.js";
+import { explainProject } from "../core/explain.js";
 import { impactProject } from "../core/impact.js";
 import { indexProject } from "../core/indexer.js";
 import { initializeProject } from "../core/init.js";
@@ -49,6 +50,16 @@ const impactHelpText = `
   luagraph impact ThemeCollectDialog --format table
   luagraph impact ThemeCollectDialog --depth 2 --format tree
   luagraph impact Diner/DinerDialogs.lua --format json
+`;
+
+const explainHelpText = `
+说明:
+  explain 从文件或符号出发解释入口、调用流、分支、依赖和外部缺口。
+  explain 只按需读取单文件源码，不写回 .luagraph。
+
+示例:
+  luagraph explain src/core/query.ts --format text
+  luagraph explain queryProject --depth 2 --format json --project-root .
 `;
 
 const indexHelpText = `
@@ -197,6 +208,35 @@ export function createCli(): Command {
     });
 
   program
+    .command("explain")
+    .argument("<file-or-symbol>", "文件路径、符号名或 qualifiedName")
+    .option("--depth <n>", "解释调用流展开深度", "2")
+    .option("--format <format>", "输出格式：json 或 text", "text")
+    .option("--project-root <path>", "Lua 项目根目录，默认当前目录")
+    .description("解释文件或符号的语义链路")
+    .action(async (input: string, options?: ExplainCommandOptions) => {
+      const outputFormat = parseExplainOutputFormat(options?.format ?? "text");
+      const depth = parseGraphDepth(options?.depth ?? "2");
+
+      if (outputFormat === undefined) {
+        program.error("explain --format 仅支持 json 或 text");
+        return;
+      }
+
+      if (depth === undefined) {
+        program.error("explain --depth 必须是正整数");
+        return;
+      }
+
+      try {
+        const result = await explainProject(options?.projectRoot ?? process.cwd(), input, { depth });
+        console.log(formatExplainResult(result, outputFormat));
+      } catch (error) {
+        program.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+  program
     .command("serve")
     .argument("[project_root]", "Lua 项目根目录，默认当前目录")
     .option("--port <port>", "HTTP 端口，默认随机可用端口", "0")
@@ -288,6 +328,7 @@ export function createCli(): Command {
 
   appendHelpFooter(program, "query", queryHelpText);
   appendHelpFooter(program, "impact", impactHelpText);
+  appendHelpFooter(program, "explain", explainHelpText);
   appendHelpFooter(program, "index", indexHelpText);
   appendHelpFooter(program, "sync", syncHelpText);
 
@@ -332,6 +373,12 @@ type ImpactCommandOptions = {
   readonly projectRoot?: string;
 };
 
+type ExplainCommandOptions = {
+  readonly format?: string;
+  readonly depth?: string;
+  readonly projectRoot?: string;
+};
+
 type ServeCommandOptions = {
   readonly port?: string;
   readonly open?: boolean;
@@ -370,6 +417,10 @@ function parseQueryOutputFormat(value: string): GraphOutputFormat | undefined {
 
 function parseGraphOutputFormat(value: string): GraphOutputFormat | undefined {
   return value === "json" || value === "table" || value === "tree" ? value : undefined;
+}
+
+function parseExplainOutputFormat(value: string): ExplainOutputFormat | undefined {
+  return value === "json" || value === "text" ? value : undefined;
 }
 
 function parseSampleLimit(value: string): number | undefined {

@@ -67,6 +67,18 @@ luagraph impact Module.method --format json      # qualifiedName 输入：输出
 
 `impact` 的文件影响来自 `Requires`，符号影响来自 `Calls`。
 
+## 语义解释
+
+```bash
+luagraph explain src/core/query.ts --format text              # 解释文件入口、调用流、分支和依赖。
+luagraph explain queryProject --depth 2 --format json         # 解释符号链路并输出机器可读 JSON。
+luagraph explain src/main.lua --project-root /path/to/project # 指定项目根目录。
+```
+
+`explain` 按需读取目标单文件源码和已索引图数据，不写回 `.luagraph`。
+
+`--format text` 固定输出 `target`、`entrypoints`、`flow`、`branches`、`dependencies`、`dataFlow`、`externalGaps` 七段；`--format json` 保留同名字段。
+
 ## 可视化服务
 
 ```bash
@@ -136,4 +148,5 @@ submit/test-query.sh                # query 查询验收。
 submit/test-requires.sh             # Requires 最小闭环验收。
 submit/test-extends.sh              # Extends 最小闭环验收。
 submit/test-sync-refresh.sh         # sync 增量刷新验收。
+submit/test-explain-cli.sh          # explain CLI text/json 端到端验收。
 ```

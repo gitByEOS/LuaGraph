@@ -1,4 +1,12 @@
 import type {
+  ExplainBranch,
+  ExplainDataFlowStep,
+  ExplainDependency,
+  ExplainEntrypoint,
+  ExplainFlow,
+  ExplainFlowCall,
+  ExplainTarget,
+  LuaGraphExplainResult,
   LuaGraphImpactResult,
   LuaGraphQueryResult,
   QueryCallEdge,
@@ -9,6 +17,7 @@ import type {
 } from "../core/project-types.js";
 
 export type GraphOutputFormat = "json" | "table" | "tree";
+export type ExplainOutputFormat = "json" | "text";
 
 export function formatQueryResult(result: LuaGraphQueryResult, format: GraphOutputFormat): string {
   if (format === "json") {
@@ -32,6 +41,22 @@ export function formatImpactResult(result: LuaGraphImpactResult, format: GraphOu
   }
 
   return formatImpactTable(result);
+}
+
+export function formatExplainResult(result: LuaGraphExplainResult, format: ExplainOutputFormat): string {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+
+  return [
+    `target: ${formatExplainTarget(result.target)}`,
+    `entrypoints: ${formatExplainEntrypoints(result.entrypoints)}`,
+    `flow: ${formatExplainFlows(result.flow)}`,
+    `branches: ${formatExplainBranches(result.branches)}`,
+    `dependencies: ${formatExplainDependencies(result.dependencies)}`,
+    `dataFlow: ${formatExplainDataFlow(result.dataFlow)}`,
+    `externalGaps: ${formatExplainExternalGaps(result.externalGaps)}`,
+  ].join("\n");
 }
 
 function formatQueryTable(result: LuaGraphQueryResult): string {
@@ -205,6 +230,75 @@ function padAscii(value: string, width: number): string {
 
 function asciiWidth(value: string): number {
   return value.length;
+}
+
+function formatExplainTarget(target: ExplainTarget): string {
+  const location = target.startLine === undefined ? target.filePath : `${target.filePath}:${target.startLine}`;
+
+  return `${target.type} ${target.name} (${location})`;
+}
+
+function formatExplainEntrypoints(entrypoints: readonly ExplainEntrypoint[]): string {
+  if (entrypoints.length === 0) {
+    return "无";
+  }
+
+  return entrypoints.map((entrypoint) => entrypoint.qualifiedName).join(", ");
+}
+
+function formatExplainFlows(flows: readonly ExplainFlow[]): string {
+  const paths = flows.flatMap((flow) => formatExplainFlowPaths(flow.entrypoint, flow.calls));
+
+  if (paths.length === 0) {
+    return flows.length === 0 ? "无" : flows.map((flow) => flow.entrypoint).join(", ");
+  }
+
+  return paths.join("; ");
+}
+
+function formatExplainFlowPaths(entrypoint: string, calls: readonly ExplainFlowCall[]): string[] {
+  if (calls.length === 0) {
+    return [entrypoint];
+  }
+
+  return calls.flatMap((call) => {
+    const prefix = `${entrypoint} -> ${call.to}`;
+    const children = formatExplainFlowPaths(prefix, call.calls);
+
+    return children.length === 0 ? [prefix] : children;
+  });
+}
+
+function formatExplainBranches(branches: readonly ExplainBranch[]): string {
+  if (branches.length === 0) {
+    return "无";
+  }
+
+  return branches
+    .map((branch) => `${branch.functionName} 第${branch.line}行按 ${branch.condition} 分到 ${branch.kind}`)
+    .join("; ");
+}
+
+function formatExplainDependencies(dependencies: readonly ExplainDependency[]): string {
+  if (dependencies.length === 0) {
+    return "无";
+  }
+
+  return dependencies
+    .map((dependency) => `${dependency.moduleName} -> ${dependency.target} resolved=${dependency.isResolved ? "true" : "false"}`)
+    .join(", ");
+}
+
+function formatExplainDataFlow(dataFlow: readonly ExplainDataFlowStep[]): string {
+  if (dataFlow.length === 0) {
+    return "无";
+  }
+
+  return dataFlow.map((step) => step.label).join(" -> ");
+}
+
+function formatExplainExternalGaps(externalGaps: readonly string[]): string {
+  return externalGaps.length === 0 ? "无" : externalGaps.join("; ");
 }
 
 function renderRelationTree(
