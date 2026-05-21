@@ -17,8 +17,8 @@
     "commander": "latest",
     "echarts": "^6.1.0",
     "kuzu": "^0.11.3",
-    "tree-sitter": "^0.20.6",
-    "tree-sitter-lua": "^2.1.3"
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-lua": "npm:@tree-sitter-grammars/tree-sitter-lua@^0.2.0"
   },
   "devDependencies": {
     "@types/node": "latest",

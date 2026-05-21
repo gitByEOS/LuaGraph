@@ -68,10 +68,10 @@ function createLuaContext(filePath: NormalizedPath, source: string): LuaContext 
 
 function extractLuaSymbolsFromTree(context: LuaContext): readonly ParsedSymbol[] {
   const drafts = [
-    ...context.rootNode.descendantsOfType(["variable_assignment", "local_variable_declaration"]).flatMap((node) =>
+    ...context.rootNode.descendantsOfType(["assignment_statement", "variable_declaration"]).flatMap((node) =>
       parseAssignmentSymbol(context, node),
     ),
-    ...context.rootNode.descendantsOfType(["function_definition_statement", "local_function_definition_statement"]).flatMap((node) =>
+    ...context.rootNode.descendantsOfType("function_declaration").flatMap((node) =>
       parseFunctionSymbol(context, node),
     ),
   ];
@@ -83,23 +83,27 @@ function extractLuaSymbolsFromTree(context: LuaContext): readonly ParsedSymbol[]
 
 function extractLuaCallsFromTree(context: LuaContext): readonly ParsedCall[] {
   return context.rootNode
-    .descendantsOfType("call")
+    .descendantsOfType("function_call")
     .flatMap((node) => parseCall(context.filePath, node));
 }
 
 function extractLuaExtendsFromTree(context: LuaContext): readonly ParsedExtend[] {
   return context.rootNode
-    .descendantsOfType(["variable_assignment", "local_variable_declaration"])
+    .descendantsOfType(["assignment_statement", "variable_declaration"])
     .flatMap((node) => parseExtends(context.filePath, node));
 }
 
 function extractLuaRequiresFromTree(context: LuaContext): readonly ParsedRequire[] {
   return context.rootNode
-    .descendantsOfType("call")
+    .descendantsOfType("function_call")
     .flatMap((node) => parseRequire(context.filePath, node));
 }
 
 function parseAssignmentSymbol(context: LuaContext, node: Parser.SyntaxNode): readonly SymbolDraft[] {
+  if (isNestedLocalAssignment(node)) {
+    return [];
+  }
+
   const assignment = readAssignment(node);
 
   if (assignment === undefined) {
@@ -118,7 +122,7 @@ function parseAssignmentSymbol(context: LuaContext, node: Parser.SyntaxNode): re
 }
 
 function parseFunctionSymbol(context: LuaContext, node: Parser.SyntaxNode): readonly SymbolDraft[] {
-  const nameNode = node.namedChildren.find((child) => child.type === "variable" || child.type === "identifier");
+  const nameNode = node.namedChildren.find(isNameNode);
 
   if (nameNode === undefined) {
     return [];
@@ -135,7 +139,7 @@ function parseFunctionSymbol(context: LuaContext, node: Parser.SyntaxNode): read
       startColumn: toColumn(node),
       endColumn: node.endPosition.column,
       signature: getSignature(context.lines, node),
-      isLocal: node.type === "local_function_definition_statement",
+      isLocal: node.text.startsWith("local function"),
     },
   ];
 }
@@ -155,7 +159,7 @@ function createAssignmentSymbol(
     startColumn: toColumn(node),
     endColumn: node.endPosition.column,
     signature: getSignature(context.lines, node),
-    isLocal: node.type === "local_variable_declaration",
+    isLocal: node.type === "variable_declaration",
   };
 }
 
@@ -178,6 +182,10 @@ function parseCall(filePath: NormalizedPath, node: Parser.SyntaxNode): readonly 
 }
 
 function parseExtends(filePath: NormalizedPath, node: Parser.SyntaxNode): readonly ParsedExtend[] {
+  if (isNestedLocalAssignment(node)) {
+    return [];
+  }
+
   const assignment = readAssignment(node);
 
   if (assignment === undefined) {
@@ -253,10 +261,11 @@ type AssignmentNode = {
 };
 
 function readAssignment(node: Parser.SyntaxNode): AssignmentNode | undefined {
-  const variable = firstNamedChildOfType(node, "variable_list")?.namedChildren[0];
-  const value = firstNamedChildOfType(node, "expression_list")?.namedChildren[0];
+  const assignment = node.type === "assignment_statement" ? node : firstNamedChildOfType(node, "assignment_statement");
+  const variable = assignment === undefined ? undefined : firstNamedChildOfType(assignment, "variable_list")?.namedChildren[0];
+  const value = assignment === undefined ? undefined : firstNamedChildOfType(assignment, "expression_list")?.namedChildren[0];
 
-  if (variable?.type !== "variable" || value === undefined) {
+  if (variable === undefined || value === undefined) {
     return undefined;
   }
 
@@ -272,7 +281,16 @@ function firstNamedChildOfType(node: Parser.SyntaxNode, type: string): Parser.Sy
 }
 
 function isRootTableAssignment(node: Parser.SyntaxNode, assignment: AssignmentNode): boolean {
-  return node.type === "variable_assignment" && node.parent?.type === "chunk" && assignment.variable.startPosition.column === 0 && assignment.value.type === "table";
+  return (
+    node.type === "assignment_statement" &&
+    node.parent?.type === "chunk" &&
+    assignment.variable.startPosition.column === 0 &&
+    assignment.value.type === "table_constructor"
+  );
+}
+
+function isNestedLocalAssignment(node: Parser.SyntaxNode): boolean {
+  return node.type === "assignment_statement" && node.parent?.type === "variable_declaration";
 }
 
 function isCallNamed(node: Parser.SyntaxNode, name: string): boolean {
@@ -282,18 +300,18 @@ function isCallNamed(node: Parser.SyntaxNode, name: string): boolean {
 function getCallCalleeName(node: Parser.SyntaxNode): string | undefined {
   const callee = node.namedChildren[0];
 
-  return callee?.type === "variable" ? callee.text : undefined;
+  return callee !== undefined && isNameNode(callee) ? callee.text : undefined;
 }
 
 function getFirstCallArgument(node: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
-  const argumentList = firstNamedChildOfType(node, "argument_list");
+  const argumentList = firstNamedChildOfType(node, "arguments");
   const argument = argumentList?.namedChildren[0];
 
   return argument?.type === "expression_list" ? argument.namedChildren[0] : argument;
 }
 
 function getCallArguments(node: Parser.SyntaxNode): readonly Parser.SyntaxNode[] {
-  const argumentList = firstNamedChildOfType(node, "argument_list");
+  const argumentList = firstNamedChildOfType(node, "arguments");
   const argument = argumentList?.namedChildren[0];
 
   return argument?.type === "expression_list" ? argument.namedChildren : argumentList?.namedChildren ?? [];
@@ -306,7 +324,7 @@ function getClassParent(node: Parser.SyntaxNode): string | undefined {
 
   const parent = getCallArguments(node)[1];
 
-  return parent?.type === "variable" ? parent.text : undefined;
+  return parent !== undefined && isNameNode(parent) ? parent.text : undefined;
 }
 
 function getSetmetatableParent(node: Parser.SyntaxNode): string | undefined {
@@ -318,11 +336,15 @@ function getSetmetatableParent(node: Parser.SyntaxNode): string | undefined {
   const indexField = metatable?.descendantsOfType("field").find(isIndexField);
   const parent = indexField?.namedChildren[1];
 
-  return parent?.type === "variable" ? parent.text : undefined;
+  return parent !== undefined && isNameNode(parent) ? parent.text : undefined;
 }
 
 function isIndexField(node: Parser.SyntaxNode): boolean {
   return node.namedChildren[0]?.text === "__index";
+}
+
+function isNameNode(node: Parser.SyntaxNode): boolean {
+  return node.type === "identifier" || node.type === "dot_index_expression" || node.type === "method_index_expression";
 }
 
 function parseStaticRequireModule(node: Parser.SyntaxNode): string | undefined {
