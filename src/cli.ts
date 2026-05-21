@@ -24,6 +24,8 @@ const queryHelpText = `
   callees:<symbol>           查询该符号调用了谁，用于看内部依赖
   extends:<symbol>           查询该符号继承的父级
   subclasses:<symbol>        查询继承该符号的子级
+  requires:<file>            查询文件 require 了哪些项目内文件
+  dependents:<file>          查询哪些文件 require 了该文件
   kind:<kind> name:<symbol>  组合过滤
 
 示例:
@@ -33,13 +35,15 @@ const queryHelpText = `
   luagraph query callees:ThemeProgressDialog:collectMaterial --depth 2 --format tree
   luagraph query extends:Child --format table
   luagraph query subclasses:Base --depth 2 --format tree
+  luagraph query requires:src/main.lua --format json
+  luagraph query dependents:src/utils.lua --format json
   luagraph query kind:method name:collectMaterial --format table
 `;
 
 const impactHelpText = `
 说明:
   impact 从文件或符号出发，沿 Calls 反向关系查找受影响调用者。
-  文件输入会先定位该文件内的 Symbol，再分析反向调用链。
+  文件输入会同时沿 Requires 反向关系查找依赖它的文件。
 
 示例:
   luagraph impact ThemeCollectDialog --format table
@@ -424,6 +428,8 @@ function formatSyncResult(result: SyncResult, format: SyncOutputFormat): string 
     `removedFileCount: ${result.removedFileCount}`,
     `symbolCount: ${result.symbolCount}`,
     `containsCount: ${result.containsCount}`,
+    `extendsCount: ${result.extendsCount}`,
+    `requiresCount: ${result.requiresCount}`,
     `databaseDir: ${result.databaseDir}`,
   ].join("\n");
 }

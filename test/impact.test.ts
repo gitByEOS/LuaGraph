@@ -155,6 +155,35 @@ describe("impactProject", () => {
     ]);
     expect(result.edges).toHaveLength(2);
   });
+
+  it("文件影响分析包含反向 Requires 依赖文件", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "src/main.lua", 'local utils = require("utils")');
+    await writeLuaFile(projectRoot, "src/feature.lua", 'local utils = require("utils")');
+    await writeLuaFile(projectRoot, "src/utils.lua", "function helper()\nend");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "src/utils.lua");
+
+    expect(result.files).toEqual(["src/feature.lua", "src/main.lua"]);
+    expect(result.edges).toEqual([
+      {
+        kind: "Requires",
+        source: "src/feature.lua",
+        target: "src/utils.lua",
+        moduleName: "utils",
+        isResolved: true,
+      },
+      {
+        kind: "Requires",
+        source: "src/main.lua",
+        target: "src/utils.lua",
+        moduleName: "utils",
+        isResolved: true,
+      },
+    ]);
+  });
 });
 
 async function createIndexedProject(): Promise<string> {

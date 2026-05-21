@@ -27,6 +27,7 @@ export type LuaFile = {
   readonly symbols: readonly LuaSymbol[];
   readonly calls: readonly LuaCall[];
   readonly extends: readonly LuaExtend[];
+  readonly requires: readonly LuaRequire[];
 };
 
 export type LuaSymbol = {
@@ -59,6 +60,15 @@ export type LuaExtend = {
   readonly filePath: NormalizedPath;
   readonly childQualifiedName: string;
   readonly parentQualifiedName: string;
+  readonly line: number;
+  readonly column: number;
+};
+
+export type LuaRequire = {
+  readonly type: "Require";
+  readonly filePath: NormalizedPath;
+  readonly moduleName: string;
+  readonly isStatic: boolean;
   readonly line: number;
   readonly column: number;
 };
@@ -109,6 +119,8 @@ export type IndexResult = {
   readonly symbolCount: number;
   readonly containsCount: number;
   readonly callsCount: number;
+  readonly extendsCount: number;
+  readonly requiresCount: number;
   readonly databaseDir: string;
 };
 
@@ -118,6 +130,8 @@ export type SyncResult = {
   readonly removedFileCount: number;
   readonly symbolCount: number;
   readonly containsCount: number;
+  readonly extendsCount: number;
+  readonly requiresCount: number;
   readonly databaseDir: string;
 };
 
@@ -157,7 +171,15 @@ export type QueryExtendsEdge = {
   readonly target: string;
 };
 
-export type QueryEdge = QueryCallEdge | QueryExtendsEdge;
+export type QueryRequireEdge = {
+  readonly kind: "Requires";
+  readonly source: string;
+  readonly target: string;
+  readonly moduleName: string;
+  readonly isResolved: boolean;
+};
+
+export type QueryEdge = QueryCallEdge | QueryExtendsEdge | QueryRequireEdge;
 
 export type LuaGraphQueryResult = {
   readonly projectRoot: string;
@@ -177,5 +199,5 @@ export type LuaGraphImpactResult = {
   readonly count: number;
   readonly nodes: readonly QuerySymbolNode[];
   readonly files: readonly string[];
-  readonly edges: readonly QueryCallEdge[];
+  readonly edges: readonly QueryEdge[];
 };

@@ -6,7 +6,7 @@ import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 import { configPath, readConfig } from "./config.js";
 import { normalizeRepositoryPath } from "./path.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { LuaGraphImpactResult, QueryCallEdge, QuerySymbolNode } from "./types.js";
+import type { LuaGraphImpactResult, QueryCallEdge, QueryEdge, QueryRequireEdge, QuerySymbolNode } from "./types.js";
 
 export type ImpactProjectOptions = {
   readonly depth?: number;
@@ -34,23 +34,66 @@ export async function impactProject(
   const connection = new Connection(database);
 
   try {
+    const inputFilePath = normalizeInputFilePath(resolvedProjectRoot, input);
     const seeds = await querySeeds(connection, resolvedProjectRoot, input);
     const { nodes, edges } = await queryImpactCallers(connection, seeds, depth);
+    const requireImpact =
+      inputFilePath !== undefined && (await hasFile(connection, inputFilePath))
+        ? await queryImpactDependents(connection, inputFilePath, depth)
+        : { files: [], edges: [] };
+    const files = sortStrings([...new Set([...nodes.map((node) => node.filePath), ...requireImpact.files])]);
 
     return {
       projectRoot: resolvedProjectRoot,
       input,
       depth,
       seeds,
-      count: nodes.length,
+      count: nodes.length + requireImpact.files.length,
       nodes,
-      files: sortStrings([...new Set(nodes.map((node) => node.filePath))]),
-      edges,
+      files,
+      edges: sortEdges([...edges, ...requireImpact.edges]),
     };
   } finally {
     await connection.close();
     await database.close();
   }
+}
+
+async function queryImpactDependents(
+  connection: Connection,
+  filePath: string,
+  depth: number,
+): Promise<{ readonly files: string[]; readonly edges: QueryRequireEdge[] }> {
+  const files = new Set<string>();
+  const edgesByKey = new Map<string, QueryRequireEdge>();
+  const visited = new Set([filePath]);
+  let frontier = [filePath];
+
+  for (let level = 0; level < depth && frontier.length > 0; level += 1) {
+    const nextFrontier: string[] = [];
+
+    for (const targetPath of frontier) {
+      const rows = await queryDependentRows(connection, targetPath);
+
+      for (const row of rows) {
+        const edge = toRequireEdge(row);
+        files.add(edge.source);
+        edgesByKey.set(edgeKey(edge), edge);
+
+        if (!visited.has(edge.source)) {
+          visited.add(edge.source);
+          nextFrontier.push(edge.source);
+        }
+      }
+    }
+
+    frontier = sortStrings(nextFrontier);
+  }
+
+  return {
+    files: sortStrings([...files]),
+    edges: sortEdges([...edgesByKey.values()]).filter((edge): edge is QueryRequireEdge => edge.kind === "Requires"),
+  };
 }
 
 function normalizeDepth(depth: number): number {
@@ -169,7 +212,7 @@ async function queryImpactCallers(
 
   return {
     nodes: sortSymbols([...nodesById.values()]),
-    edges: sortEdges([...edgesByKey.values()]),
+    edges: sortEdges([...edgesByKey.values()]).filter((edge): edge is QueryCallEdge => edge.kind === "Calls"),
   };
 }
 
@@ -187,6 +230,20 @@ RETURN caller.id AS id, caller.kind AS kind, caller.name AS name,
   caller.id AS edgeSource, target.id AS edgeTarget, call.line AS line,
   call.\`column\` AS callColumn, call.isResolved AS isResolved;`,
     { targetId },
+  );
+}
+
+async function queryDependentRows(
+  connection: Connection,
+  targetPath: string,
+): Promise<Record<string, unknown>[]> {
+  return queryRows(
+    connection,
+    `MATCH (source:File)-[require:Requires]->(target:File)
+WHERE target.path = $targetPath AND source.path <> target.path
+RETURN source.path AS edgeSource, target.path AS edgeTarget,
+  require.moduleName AS moduleName, require.isResolved AS isResolved;`,
+    { targetPath },
   );
 }
 
@@ -246,8 +303,26 @@ function toCallEdge(row: Record<string, unknown>): QueryCallEdge {
   };
 }
 
-function edgeKey(edge: QueryCallEdge): string {
-  return `${edge.source}->${edge.target}@${edge.line}:${edge.column}`;
+function toRequireEdge(row: Record<string, unknown>): QueryRequireEdge {
+  return {
+    kind: "Requires",
+    source: readString(row.edgeSource, "edgeSource"),
+    target: readString(row.edgeTarget, "edgeTarget"),
+    moduleName: readString(row.moduleName, "moduleName"),
+    isResolved: readBoolean(row.isResolved, "isResolved"),
+  };
+}
+
+function edgeKey(edge: QueryEdge): string {
+  if (edge.kind === "Requires") {
+    return `${edge.kind}:${edge.source}->${edge.target}:${edge.moduleName}`;
+  }
+
+  if (edge.kind === "Extends") {
+    return `${edge.kind}:${edge.source}->${edge.target}`;
+  }
+
+  return `${edge.kind}:${edge.source}->${edge.target}@${edge.line}:${edge.column}`;
 }
 
 function sortSymbols(nodes: readonly QuerySymbolNode[]): QuerySymbolNode[] {
@@ -263,14 +338,26 @@ function compareSymbols(left: QuerySymbolNode, right: QuerySymbolNode): number {
   );
 }
 
-function sortEdges(edges: readonly QueryCallEdge[]): QueryCallEdge[] {
+function sortEdges(edges: readonly QueryEdge[]): QueryEdge[] {
   return [...edges].sort(
     (left, right) =>
+      left.kind.localeCompare(right.kind) ||
       left.source.localeCompare(right.source) ||
       left.target.localeCompare(right.target) ||
-      left.line - right.line ||
-      left.column - right.column,
+      compareEdgeLocation(left, right),
   );
+}
+
+function compareEdgeLocation(left: QueryEdge, right: QueryEdge): number {
+  if (left.kind === "Extends" || right.kind === "Extends") {
+    return 0;
+  }
+
+  if (left.kind === "Requires" || right.kind === "Requires") {
+    return 0;
+  }
+
+  return left.line - right.line || left.column - right.column;
 }
 
 function sortStrings(values: readonly string[]): string[] {

@@ -159,7 +159,7 @@ describe("luagraph index CLI", () => {
         "[index] 扫描到 1 个 Lua 文件",
         "[index] 开始索引 Lua 符号",
         "[index] 索引文件[1/1] player.lua ...",
-        "[index] 完成统计：文件 1，符号 2，Contains 2，Calls 0",
+        "[index] 完成统计：文件 1，符号 2，Contains 2，Calls 0，Extends 0，Requires 0",
       ]),
     );
 
@@ -220,7 +220,9 @@ describe("luagraph sync CLI", () => {
         "[sync] 待刷新 1 个文件，待删除 0 个文件",
         "[sync] 同步文件[1/1] player.lua",
         "[sync] 开始重建 Calls",
-        "[sync] 完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0",
+        "[sync] 开始重建 Extends",
+        "[sync] 开始重建 Requires",
+        "[sync] 完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0，Extends 0，Requires 0",
       ]),
     );
 
@@ -304,6 +306,8 @@ describe("luagraph query CLI", () => {
     expect(helpText).toContain("kind:<kind>");
     expect(helpText).toContain("callers:<symbol>");
     expect(helpText).toContain("callees:<symbol>");
+    expect(helpText).toContain("requires:<file>");
+    expect(helpText).toContain("dependents:<file>");
     expect(helpText).toContain("输出格式：json、table 或 tree");
     expect(helpText).toContain("luagraph query callers:ThemeCollectDialog --depth 2 --format tree");
   });

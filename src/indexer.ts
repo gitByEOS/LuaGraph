@@ -8,6 +8,7 @@ import { rebuildCallsRelationships } from "./call-graph.js";
 import { readConfig } from "./config.js";
 import { rebuildExtendsRelationships } from "./extend-graph.js";
 import { parseLuaFile } from "./parser.js";
+import { rebuildRequiresRelationships } from "./require-graph.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
 import type { IndexResult, LuaFile, LuaSymbol, NormalizedPath, ScannedLuaFile } from "./types.js";
@@ -52,6 +53,7 @@ export async function indexProject(
   let containsCount = 0;
   let callsCount = 0;
   let extendsCount = 0;
+  let requiresCount = 0;
 
   try {
     await initializeSchema(connection);
@@ -80,6 +82,10 @@ export async function indexProject(
       connection,
       parsedFiles.map((file) => file.parsed),
     );
+    requiresCount = await rebuildRequiresRelationships(
+      connection,
+      parsedFiles.map((file) => file.parsed),
+    );
   } finally {
     await connection.close();
     await database.close();
@@ -87,7 +93,7 @@ export async function indexProject(
 
   reportProgress(
     options,
-    `完成统计：文件 ${files.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}，Extends ${extendsCount}`,
+    `完成统计：文件 ${files.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}，Extends ${extendsCount}，Requires ${requiresCount}`,
   );
 
   return {
@@ -95,6 +101,8 @@ export async function indexProject(
     symbolCount,
     containsCount,
     callsCount,
+    extendsCount,
+    requiresCount,
     databaseDir,
   };
 }

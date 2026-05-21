@@ -8,6 +8,7 @@ import { deleteCallsForFiles, rebuildCallsRelationships } from "./call-graph.js"
 import { configPath, readConfig } from "./config.js";
 import { deleteExtendsForFiles, rebuildExtendsRelationships } from "./extend-graph.js";
 import { parseLuaFile } from "./parser.js";
+import { deleteRequiresForFiles, rebuildRequiresRelationships } from "./require-graph.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
 import type { LuaSymbol, NormalizedPath, ScannedLuaFile, SyncResult } from "./types.js";
@@ -70,18 +71,24 @@ export async function syncProject(
 
     await deleteCallsForFiles(connection, affectedFilePaths);
     await deleteExtendsForFiles(connection, affectedFilePaths);
+    await deleteRequiresForFiles(connection, affectedFilePaths);
     await removeIndexedFiles(connection, affectedFilePaths);
     await writeChangedFiles(connection, changedFiles, options);
     let callsCount = 0;
     let extendsCount = 0;
+    let requiresCount = 0;
     if (affectedFilePaths.length > 0) {
-      reportProgress(options, "开始重建 Calls");
       const parsedFiles = currentFiles.map((file) => parseLuaFile(file.file.path, file.content));
+      reportProgress(options, "开始重建 Calls");
       callsCount = await rebuildCallsRelationships(connection, parsedFiles);
       reportProgress(options, "开始重建 Extends");
       extendsCount = await rebuildExtendsRelationships(connection, parsedFiles);
+      reportProgress(options, "开始重建 Requires");
+      requiresCount = await rebuildRequiresRelationships(connection, parsedFiles);
     } else {
-      reportProgress(options, "跳过重建 Calls/Extends：无变更文件");
+      reportProgress(options, "跳过重建 Calls：无变更文件");
+      reportProgress(options, "跳过重建 Extends：无变更文件");
+      reportProgress(options, "跳过重建 Requires：无变更文件");
     }
 
     const symbolCount = await countQuery(connection, "MATCH (symbol:Symbol) RETURN count(symbol) AS count;");
@@ -91,7 +98,7 @@ export async function syncProject(
     );
     reportProgress(
       options,
-      `完成统计：扫描 ${files.length}，刷新 ${changedFiles.length}，删除 ${removedFilePaths.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}，Extends ${extendsCount}`,
+      `完成统计：扫描 ${files.length}，刷新 ${changedFiles.length}，删除 ${removedFilePaths.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}，Extends ${extendsCount}，Requires ${requiresCount}`,
     );
 
     return {
@@ -100,6 +107,8 @@ export async function syncProject(
       removedFileCount: removedFilePaths.length,
       symbolCount,
       containsCount,
+      extendsCount,
+      requiresCount,
       databaseDir,
     };
   } finally {

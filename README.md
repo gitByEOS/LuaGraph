@@ -2,7 +2,7 @@
 
 ## 项目架构
 
-LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提取可索引符号、调用关系与最小继承关系，并写入 Kuzu 图数据库。当前 CLI 覆盖 `init`、`status`、`index`、`sync`、`sample`、`query`、`impact` 和 `serve`，工具链使用 npm scripts 与 Vitest/TypeScript。
+LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提取可索引符号、调用关系、最小继承关系与 Lua require 文件依赖，并写入 Kuzu 图数据库。当前 CLI 覆盖 `init`、`status`、`index`、`sync`、`sample`、`query`、`impact` 和 `serve`，工具链使用 npm scripts 与 Vitest/TypeScript。
 
 ### 已完成模块
 
@@ -15,7 +15,7 @@ LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提
 | 文件扫描    | `src/scanner.ts`                           | 已完成 |
 | 流程编排    | `src/init.ts`                              | 已完成 |
 | 状态统计    | `src/status.ts`                            | 已完成 |
-| 索引写入    | `src/indexer.ts`, `src/call-graph.ts`, `src/extend-graph.ts` | 已完成 (File/Symbol/Contains/Calls/Extends) |
+| 索引写入    | `src/indexer.ts`, `src/call-graph.ts`, `src/extend-graph.ts`, `src/require-graph.ts` | 已完成 (File/Symbol/Contains/Calls/Extends/Requires) |
 | 抽查入口    | `src/sample.ts`                            | 已完成 |
 | 本地服务    | `src/server.ts`, `src/web/*`               | 已完成 (第一版可视化) |
 | v0.4 解析准确性 | `src/parser.ts`, `test/parser.test.ts` | 已完成 (行级模式，含函数作用域结束行和调用提取) |
@@ -24,6 +24,7 @@ LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提
 | v0.7 影响分析 | `src/impact.ts`                          | 已完成 |
 | v0.7 输出格式 | `src/format.ts`                          | 已完成 (query/impact 的 json/table/tree) |
 | v0.8 最小继承 | `src/parser.ts`, `src/extend-graph.ts`, `src/query.ts` | 已完成 (`setmetatable({}, { __index = Parent })`) |
+| v0.8 Requires | `src/parser.ts`, `src/require-graph.ts`, `src/query.ts`, `src/impact.ts` | 已完成最小闭环 (静态/动态 require、查询、反向影响) |
 
 ### 模块结构
 
@@ -34,12 +35,12 @@ LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提
 - `src/path.ts`：Git 风格路径规范化和安全解析。
 - `src/store.ts`：Kuzu schema 入口，定义 File/Symbol 节点和 Contains/Calls/Requires/Extends 关系表。
 - `src/scanner.ts`：按配置扫描 Lua 文件并返回仓库相对路径。
-- `src/parser.ts`：行级 Lua 符号、调用和最小继承候选提取，输出 File、Symbol、Call 与 Extends 结构。
+- `src/parser.ts`：行级 Lua 符号、调用、最小继承候选和 require 提取，输出 File、Symbol、Call、Extends 与 Require 结构。
 - `src/status.ts`：读取项目配置和 Kuzu 库，统计 File、Symbol、关系、解析错误、符号分类与待同步变化数量。
 - `src/sample.ts`：index 后从 Kuzu 抽查少量 Symbol 字段，作为和 status 同级的验证入口。
 - `src/syncer.ts`：基于 contentHash 增量刷新已变更和已删除 Lua 文件。
-- `src/query.ts`：按 `name`、`kind`、`callers`、`callees`、`extends`、`subclasses` 查询已索引图。
-- `src/impact.ts`：基于 Calls 反向关系分析文件或符号的影响范围。
+- `src/query.ts`：按 `name`、`kind`、`callers`、`callees`、`extends`、`subclasses`、`requires`、`dependents` 查询已索引图。
+- `src/impact.ts`：基于 Calls 和文件级 Requires 反向关系分析影响范围。
 - `src/format.ts`：为 query/impact 提供 `json`、`table`、`tree` 输出。
 - `src/server.ts`：内置 HTTP 服务，提供 `/api/status`、`/api/graph`、`/api/code` 和静态 Web UI。
 - `src/init.ts`：初始化流程编排入口。
@@ -54,7 +55,7 @@ luagraph serve [project_root] --port <port> --open
 - `[project_root]` 默认当前目录；`--port` 不传时使用随机可用端口并输出实际 URL。
 - `--open` 会用系统默认浏览器打开服务地址。
 - 第一版展示 File/Symbol 节点与 Contains 关系，支持搜索高亮、邻居高亮和点击符号查看源码片段。
-- 当前限制：只读取已完成 `init` 和 `index` 的本地图数据库；Web 以 File、Symbol、Contains 和源码片段为主；Extends 仅覆盖确定的 `setmetatable` 类模式，不承诺 upvalue、Requires 或动态 require 分析。
+- 当前限制：只读取已完成 `init` 和 `index` 的本地图数据库；Web 以 File、Symbol、Contains 和源码片段为主；Requires 和 Extends 已在 CLI 最小闭环可用，Web 暂不展示；不承诺 upvalue 分析。
 
 ## 验收标准
 
@@ -78,6 +79,7 @@ luagraph serve [project_root] --port <port> --open
 | Query | `submit/test-query.sh` | `npm run typecheck && npx vitest run test/query.test.ts test/indexer.test.ts test/syncer.test.ts test/cli.test.ts && npm run build`，CLI 临时项目验证 name/kind/callers/callees 查询和 sync 后刷新 |
 | Impact | `submit/test-impact.sh` | `npm run typecheck && npx vitest run test/format.test.ts test/impact.test.ts test/query.test.ts test/cli.test.ts && npm run build`，CLI 临时项目验证 query/impact 的 json/table/tree 输出 |
 | Extends | `submit/test-extends.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/format.test.ts && npm run build`，CLI 临时项目验证 Extends 查询 |
+| Requires | `submit/test-requires.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/impact.test.ts test/cli.test.ts && npm run build`，CLI 临时项目验证 requires/dependents/impact |
 
 ## Systems/ 分析（已完成 ✅）
 

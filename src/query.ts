@@ -5,22 +5,36 @@ import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { LuaGraphQueryResult, QueryEdge, QueryNode, QuerySymbolNode } from "./types.js";
+import type { LuaGraphQueryResult, QueryEdge, QueryNode, QueryRequireEdge, QuerySymbolNode } from "./types.js";
 
 export type QueryProjectOptions = {
   readonly depth?: number;
 };
 
-type QueryTerm = {
-  readonly key: "name" | "kind" | RelationKey;
+type FilterQueryTerm = {
+  readonly key: "name" | "kind";
   readonly value: string;
 };
 
-type RelationQueryTerm = QueryTerm & {
-  readonly key: RelationKey;
+type CallRelationQueryTerm = {
+  readonly key: "callers" | "callees";
+  readonly value: string;
 };
 
-type RelationKey = "callers" | "callees" | "extends" | "subclasses";
+type RequireRelationQueryTerm = {
+  readonly key: "requires" | "dependents";
+  readonly value: string;
+};
+
+type ExtendsRelationQueryTerm = {
+  readonly key: "extends" | "subclasses";
+  readonly value: string;
+};
+
+type RelationQueryTerm = CallRelationQueryTerm | ExtendsRelationQueryTerm | RequireRelationQueryTerm;
+type QueryTerm = FilterQueryTerm | RelationQueryTerm;
+type RelationKey = RelationQueryTerm["key"];
+type SymbolRelationKey = CallRelationQueryTerm["key"] | ExtendsRelationQueryTerm["key"];
 
 type ParsedExpression = {
   readonly source: string;
@@ -81,7 +95,7 @@ function parseQueryExpression(expression: string): ParsedExpression {
   }
 
   if (relationTermCount > 1) {
-    throw new Error("query 表达式只能包含一个 callers、callees、extends 或 subclasses 条件");
+    throw new Error("query 表达式只能包含一个 callers、callees、extends、subclasses、requires 或 dependents 条件");
   }
 
   return { source, terms };
@@ -103,7 +117,9 @@ function parseQueryTerm(token: string): QueryTerm {
     key !== "callers" &&
     key !== "callees" &&
     key !== "extends" &&
-    key !== "subclasses"
+    key !== "subclasses" &&
+    key !== "requires" &&
+    key !== "dependents"
   ) {
     throw new Error(`query 不支持条件：${key}`);
   }
@@ -127,6 +143,10 @@ async function executeQuery(
   const relationTerm = expression.terms.find(isRelationTerm);
 
   if (relationTerm !== undefined) {
+    if (isRequireRelationTerm(relationTerm)) {
+      return executeRequireQuery(connection, relationTerm, depth);
+    }
+
     return executeRelationQuery(connection, relationTerm, createFilters(expression.terms, relationTerm), depth);
   }
 
@@ -204,7 +224,7 @@ RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
 
 async function executeRelationQuery(
   connection: Connection,
-  relationTerm: RelationQueryTerm,
+  relationTerm: CallRelationQueryTerm | ExtendsRelationQueryTerm,
   filters: QueryFilters,
   depth: number,
 ): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
@@ -223,6 +243,45 @@ async function executeRelationQuery(
       for (const row of rows) {
         const node = toSymbolNode(row);
         const edge = toRelationEdge(row, relationTerm.key);
+
+        nodesById.set(node.id, node);
+        edgesByKey.set(edgeKey(edge), edge);
+
+        if (!visited.has(node.id)) {
+          visited.add(node.id);
+          nextFrontier.push(node.id);
+        }
+      }
+    }
+
+    frontier = nextFrontier;
+  }
+
+  return {
+    nodes: sortNodes([...nodesById.values()]),
+    edges: sortEdges([...edgesByKey.values()]),
+  };
+}
+
+async function executeRequireQuery(
+  connection: Connection,
+  relationTerm: RequireRelationQueryTerm,
+  depth: number,
+): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
+  const nodesById = new Map<string, QueryNode>();
+  const edgesByKey = new Map<string, QueryRequireEdge>();
+  const visited = new Set([relationTerm.value]);
+  let frontier = [relationTerm.value];
+
+  for (let level = 0; level < depth && frontier.length > 0; level += 1) {
+    const nextFrontier: string[] = [];
+
+    for (const originPath of frontier) {
+      const rows = await queryRequireRows(connection, relationTerm.key, originPath);
+
+      for (const row of rows) {
+        const node = toFileNode(row);
+        const edge = toRequireEdge(row);
 
         nodesById.set(node.id, node);
         edgesByKey.set(edgeKey(edge), edge);
@@ -262,7 +321,7 @@ RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
 
 async function queryRelationRows(
   connection: Connection,
-  relation: RelationKey,
+  relation: SymbolRelationKey,
   originId: string,
   filters: QueryFilters,
 ): Promise<SymbolRow[]> {
@@ -281,7 +340,7 @@ RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
   );
 }
 
-function createRelationMatch(relation: RelationKey): {
+function createRelationMatch(relation: SymbolRelationKey): {
   readonly match: string;
   readonly source: string;
   readonly target: string;
@@ -320,6 +379,28 @@ function createRelationMatch(relation: RelationKey): {
     target: "origin.id",
     edgeFields: "",
   };
+}
+
+async function queryRequireRows(
+  connection: Connection,
+  relation: "requires" | "dependents",
+  originPath: string,
+): Promise<Record<string, unknown>[]> {
+  const match =
+    relation === "requires"
+      ? "MATCH (origin:File)-[require:Requires]->(file:File)"
+      : "MATCH (file:File)-[require:Requires]->(origin:File)";
+  const source = relation === "requires" ? "origin.path" : "file.path";
+  const target = relation === "requires" ? "file.path" : "origin.path";
+
+  return queryRows(
+    connection,
+    `${match}
+WHERE origin.path = $originPath
+RETURN file.path AS path, ${source} AS edgeSource, ${target} AS edgeTarget,
+  require.moduleName AS moduleName, require.isResolved AS isResolved;`,
+    { originPath },
+  );
 }
 
 function createSymbolWhereClause(
@@ -436,13 +517,40 @@ function toRelationEdge(row: Record<string, unknown>, relation: RelationKey): Qu
   };
 }
 
+function toRequireEdge(row: Record<string, unknown>): QueryRequireEdge {
+  return {
+    kind: "Requires",
+    source: readString(row.edgeSource, "edgeSource"),
+    target: readString(row.edgeTarget, "edgeTarget"),
+    moduleName: readString(row.moduleName, "moduleName"),
+    isResolved: readBoolean(row.isResolved, "isResolved"),
+  };
+}
+
 function isRelationTerm(term: QueryTerm): term is RelationQueryTerm {
-  return term.key === "callers" || term.key === "callees" || term.key === "extends" || term.key === "subclasses";
+  return (
+    term.key === "callers" ||
+    term.key === "callees" ||
+    term.key === "extends" ||
+    term.key === "subclasses" ||
+    term.key === "requires" ||
+    term.key === "dependents"
+  );
+}
+
+function isRequireRelationTerm(
+  term: RelationQueryTerm,
+): term is RequireRelationQueryTerm {
+  return term.key === "requires" || term.key === "dependents";
 }
 
 function edgeKey(edge: QueryEdge): string {
   if (edge.kind === "Extends") {
     return `${edge.kind}:${edge.source}->${edge.target}`;
+  }
+
+  if (edge.kind === "Requires") {
+    return `${edge.kind}:${edge.source}->${edge.target}:${edge.moduleName}`;
   }
 
   return `${edge.kind}:${edge.source}->${edge.target}@${edge.line}:${edge.column}`;
@@ -455,6 +563,7 @@ function sortNodes(nodes: readonly QueryNode[]): QueryNode[] {
 function sortEdges(edges: readonly QueryEdge[]): QueryEdge[] {
   return [...edges].sort(
     (left, right) =>
+      left.kind.localeCompare(right.kind) ||
       left.source.localeCompare(right.source) ||
       left.target.localeCompare(right.target) ||
       compareEdgeLocation(left, right),
@@ -464,6 +573,10 @@ function sortEdges(edges: readonly QueryEdge[]): QueryEdge[] {
 function compareEdgeLocation(left: QueryEdge, right: QueryEdge): number {
   if (left.kind === "Extends" || right.kind === "Extends") {
     return left.kind.localeCompare(right.kind);
+  }
+
+  if (left.kind === "Requires" || right.kind === "Requires") {
+    return 0;
   }
 
   return left.line - right.line || left.column - right.column;

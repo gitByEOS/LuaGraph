@@ -1,5 +1,5 @@
 import { normalizeRepositoryPath } from "./path.js";
-import type { LuaCall, LuaExtend, LuaFile, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
+import type { LuaCall, LuaExtend, LuaFile, LuaRequire, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
 
 type SymbolDraft = {
   readonly kind: SymbolKind;
@@ -26,6 +26,7 @@ const setmetatableExtendsPattern =
 const functionPattern =
   /^(?<indent>\s*)(?<local>local\s+)?function\s+(?<qualifiedName>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/;
 const callPattern = /(?<![A-Za-z0-9_])(?<callee>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/g;
+const requirePattern = /(?<![A-Za-z0-9_])require\s*\(\s*(?<expression>[^)]*?)\s*\)/g;
 
 // Phase 1 最小提取：行级模式只识别声明入口，不伪装完整 Lua AST。
 export function parseLuaFile(pathValue: string, source: string): LuaFile {
@@ -33,6 +34,7 @@ export function parseLuaFile(pathValue: string, source: string): LuaFile {
   const symbols = extractLuaSymbols(filePath, source);
   const calls = extractLuaCalls(filePath, source);
   const extendsRelationships = extractLuaExtends(filePath, source);
+  const requires = extractLuaRequires(filePath, source);
 
   return {
     type: "File",
@@ -40,6 +42,7 @@ export function parseLuaFile(pathValue: string, source: string): LuaFile {
     symbols,
     calls,
     extends: extendsRelationships,
+    requires,
   };
 }
 
@@ -60,6 +63,12 @@ export function extractLuaExtends(filePath: NormalizedPath, source: string): rea
   return source
     .split(/\r\n|\n|\r/)
     .flatMap((line, index) => parseExtendsLine(filePath, stripLuaLine(line), index + 1));
+}
+
+export function extractLuaRequires(filePath: NormalizedPath, source: string): readonly LuaRequire[] {
+  return source
+    .split(/\r\n|\n|\r/)
+    .flatMap((line, index) => parseRequireLine(filePath, stripLuaComment(line), index + 1));
 }
 
 function extractSymbolDrafts(lines: readonly string[]): readonly SymbolDraft[] {
@@ -165,6 +174,38 @@ function parseExtendsLine(
       column: getDeclarationColumn(match.groups.indent),
     },
   ];
+}
+
+function parseRequireLine(
+  filePath: NormalizedPath,
+  line: string,
+  lineNumber: number,
+): readonly LuaRequire[] {
+  const requires: LuaRequire[] = [];
+
+  for (const match of line.matchAll(requirePattern)) {
+    const expression = match.groups?.expression;
+    const callIndex = match.index;
+    if (expression === undefined || callIndex === undefined || isInsideLuaString(line, callIndex)) {
+      continue;
+    }
+
+    const moduleName = parseStaticRequireModule(expression) ?? normalizeRequireExpression(expression);
+    if (moduleName.length === 0) {
+      continue;
+    }
+
+    requires.push({
+      type: "Require",
+      filePath,
+      moduleName,
+      isStatic: parseStaticRequireModule(expression) !== undefined,
+      line: lineNumber,
+      column: callIndex + 1,
+    });
+  }
+
+  return requires;
 }
 
 function isDeclarationCallMatch(line: string, callIndex: number): boolean {
@@ -421,4 +462,67 @@ function stripLuaLine(line: string): string {
   }
 
   return stripped;
+}
+
+function stripLuaComment(line: string): string {
+  let quote: string | undefined;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (quote !== undefined) {
+      if (char === "\\") {
+        index += 1;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+
+      continue;
+    }
+
+    if (char === "-" && nextChar === "-") {
+      return line.slice(0, index);
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+    }
+  }
+
+  return line;
+}
+
+function parseStaticRequireModule(expression: string): string | undefined {
+  const match = /^\s*(["'])(?<moduleName>[^"']+)\1\s*$/.exec(expression);
+
+  return match?.groups?.moduleName;
+}
+
+function normalizeRequireExpression(expression: string): string {
+  return expression.trim().replace(/\s+/g, " ");
+}
+
+function isInsideLuaString(line: string, targetIndex: number): boolean {
+  let quote: string | undefined;
+
+  for (let index = 0; index < targetIndex; index += 1) {
+    const char = line[index];
+
+    if (quote !== undefined) {
+      if (char === "\\") {
+        index += 1;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+    }
+  }
+
+  return quote !== undefined;
 }

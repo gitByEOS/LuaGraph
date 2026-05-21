@@ -85,7 +85,6 @@ describe("queryProject", () => {
       "obj:foo",
     ]);
     const callEdges = result.edges.filter((edge) => edge.kind === "Calls");
-
     expect(callEdges.map((edge) => [edge.line, edge.column, edge.isResolved])).toEqual([
       [9, 3, true],
       [10, 3, true],
@@ -122,6 +121,50 @@ describe("queryProject", () => {
     ]);
     expect(childResult.edges[0]?.source).toContain("#class#GrandChild#");
     expect(childResult.edges[0]?.target).toContain("#class#Child#");
+  });
+
+  it("查询 requires 和 dependents 文件依赖", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "src/main.lua", 'local utils = require("utils")\n');
+    await writeLuaFile(projectRoot, "src/utils.lua", "local M = {}\nreturn M\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const requiresResult = await queryProject(projectRoot, "requires:src/main.lua");
+    const dependentsResult = await queryProject(projectRoot, "dependents:src/utils.lua");
+
+    expect(requiresResult.nodes).toEqual([
+      {
+        type: "File",
+        id: "src/utils.lua",
+        kind: "file",
+        name: "utils.lua",
+        path: "src/utils.lua",
+      },
+    ]);
+    expect(requiresResult.edges).toEqual([
+      {
+        kind: "Requires",
+        source: "src/main.lua",
+        target: "src/utils.lua",
+        moduleName: "utils",
+        isResolved: true,
+      },
+    ]);
+    expect(dependentsResult.nodes).toEqual([
+      {
+        type: "File",
+        id: "src/main.lua",
+        kind: "file",
+        name: "main.lua",
+        path: "src/main.lua",
+      },
+    ]);
+    expect(JSON.parse(JSON.stringify(dependentsResult))).toMatchObject({
+      expression: "dependents:src/utils.lua",
+      count: 1,
+      edges: [{ kind: "Requires", source: "src/main.lua", target: "src/utils.lua" }],
+    });
   });
 });
 

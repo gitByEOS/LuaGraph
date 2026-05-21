@@ -49,7 +49,7 @@ luagraph init .
 
 ### 2. 索引 Lua 符号
 
-扫描指定模式的 Lua 文件，提取 class/table/function/method 符号、可解析 Calls 关系和确定的 Extends 关系并写入 Kuzu：
+扫描指定模式的 Lua 文件，提取 class/table/function/method 符号、可解析 Calls 关系、确定的 Extends 关系和文件级 Requires 关系并写入 Kuzu：
 
 ```bash
 # 索引目标项目
@@ -66,13 +66,15 @@ luagraph index /path/to/your/lua/project --force --format json
   "symbolCount": 42,
   "containsCount": 42,
   "callsCount": 12,
+  "extendsCount": 2,
+  "requiresCount": 6,
   "databaseDir": "/path/to/.luagraph/kuzu"
 }
 ```
 
 ### 3. 增量刷新索引
 
-`sync` 基于 contentHash 处理新增、变更和删除的 Lua 文件，并刷新相关 Symbol、Contains、Calls 和 Extends 数据。无参数时默认使用当前目录：
+`sync` 基于 contentHash 处理新增、变更和删除的 Lua 文件，并刷新相关 Symbol、Contains、Calls、Extends 和 Requires 数据。无参数时默认使用当前目录：
 
 ```bash
 luagraph sync
@@ -89,6 +91,8 @@ luagraph sync /path/to/your/lua/project --quiet
   "removedFileCount": 1,
   "symbolCount": 41,
   "containsCount": 41,
+  "extendsCount": 2,
+  "requiresCount": 5,
   "databaseDir": "/path/to/.luagraph/kuzu"
 }
 ```
@@ -153,7 +157,7 @@ luagraph status --project-root /path/to/your/lua/project
 
 ### 6. 查询图数据
 
-`query` 读取已索引图，支持按名称、类型、Calls 和 Extends 关系查询。表达式可以组合普通过滤条件；关系条件一次只使用一个：
+`query` 读取已索引图，支持按名称、类型、Calls、Extends 和 Requires 关系查询。表达式可以组合普通过滤条件；关系条件一次只使用一个：
 
 ```bash
 luagraph query name:init
@@ -163,17 +167,19 @@ luagraph query callers:init --depth 2
 luagraph query callees:init --format tree
 luagraph query extends:Child --format table
 luagraph query subclasses:Base --depth 2 --format tree
+luagraph query requires:src/main.lua --format json
+luagraph query dependents:src/utils.lua --format json
 luagraph query name:init --project-root /path/to/your/lua/project --format table
 ```
 
 支持的输出格式：
-- `json`：结构化结果，包含 `nodes` 和 `edges`，Extends 边会以 `kind: "Extends"` 输出。
+- `json`：结构化结果，包含 `nodes` 和 `edges`；Extends 边输出 `kind: "Extends"`，Requires 边输出 `kind: "Requires"`。
 - `table`：逐行输出匹配节点，便于终端阅读。
-- `tree`：按 callers/callees/extends/subclasses 关系展示层级，循环节点会标记 `(cycle)`。
+- `tree`：按 callers/callees/extends/subclasses/requires/dependents 关系展示层级，循环节点会标记 `(cycle)`。
 
 ### 7. 分析影响范围
 
-`impact` 基于 Calls 反向关系分析调用者影响范围。输入可以是文件路径、符号名或 qualifiedName：
+`impact` 基于 Calls 反向关系分析调用者影响范围；输入是文件路径时，也会返回反向 Requires 依赖文件。输入可以是文件路径、符号名或 qualifiedName：
 
 ```bash
 luagraph impact src/api.lua
@@ -185,7 +191,7 @@ luagraph impact leaf --project-root /path/to/your/lua/project
 ```
 
 支持的输出格式：
-- `json`：结构化结果，包含种子符号、受影响符号、文件列表和 Calls 边。
+- `json`：结构化结果，包含种子符号、受影响符号、文件列表、Calls 边和文件级 Requires 边。
 - `table`：分段列出 seeds、affected 和 files。
 - `tree`：从输入符号向调用者方向展示影响链。
 
@@ -215,7 +221,8 @@ node dist/cli.js serve /path/to/your/lua/project --port 43210 --open
 - 需要先执行 `init` 和 `index`，索引刷新由 CLI `sync` 执行。
 - Web 仍以 File、Symbol、Contains 和源码片段为主。
 - Extends 仅识别确定的 `Child = setmetatable({}, { __index = Parent })` 和 `local Child = ...` 模式。
-- 不承诺 upvalue、Requires 或动态 require 分析。
+- Requires 已在 CLI 最小闭环可用；Web 暂不展示 Requires。
+- 不承诺 upvalue 分析。
 - 不提供前端构建链，不监听文件变化。
 
 ### 9. 完整工作流示例
@@ -240,6 +247,8 @@ node dist/cli.js sync . --format table
 node dist/cli.js sample
 node dist/cli.js status
 node dist/cli.js query callers:init --depth 2 --format tree
+node dist/cli.js query subclasses:Base --depth 2 --format tree
+node dist/cli.js query requires:src/main.lua --format json
 node dist/cli.js impact init --format table
 
 # 查看可视化
@@ -286,6 +295,7 @@ submit/test-sync-refresh.sh    # sync 增量刷新验收
 submit/test-query.sh           # query 查询验收
 submit/test-impact.sh          # impact 与格式验收
 submit/test-extends.sh         # Extends 最小闭环验收
+submit/test-requires.sh        # Requires 最小闭环验收
 ```
 
 ### 快速验证（最快）
@@ -308,8 +318,8 @@ submit/test-agent-verify.sh
 | Symbol | 符号（class/table/function/method） | id, kind, name, qualifiedName, filePath, startLine |
 | Contains | 文件→符号 | — |
 | Calls | 符号→符号（调用） | line, column, isResolved |
-| Requires | schema 预留关系表，当前解析流程不写入 | moduleName, isResolved |
 | Extends | 符号→父级符号（最小继承） | — |
+| Requires | 文件→文件（require 依赖） | moduleName, isResolved |
 
 ## Parser 当前支持的符号类型
 
@@ -322,4 +332,4 @@ submit/test-agent-verify.sh
 | Function | `function foo()` | function |
 | Local Function | `local function foo()` | function |
 
-Parser 使用行级模式，不读取 AST。Extends 仅识别 `Child = setmetatable({}, { __index = Parent })` 与 `local Child = ...` 的确定符号关系；`T.__index = T` 和动态 parent 表达式不会生成确定继承边。当前不承诺 upvalue、Requires 或动态 require 分析。
+Parser 使用行级模式，不读取 AST。Extends 仅识别 `Child = setmetatable({}, { __index = Parent })` 与 `local Child = ...` 的确定符号关系；`T.__index = T` 和动态 parent 表达式不会生成确定继承边。Requires 支持 `require("foo.bar")`、`local M = require("foo.bar")` 和动态 require 标记；动态 require 会写入 `Requires` 边，`moduleName` 保留表达式，`isResolved=false`。当前不承诺 upvalue 分析。

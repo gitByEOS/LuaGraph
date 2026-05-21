@@ -98,6 +98,7 @@ describe("Lua parser Phase 1 最小提取", () => {
           column: 15,
         },
       ],
+      requires: [],
     });
   });
 
@@ -148,6 +149,45 @@ describe("Lua parser Phase 1 最小提取", () => {
       { calleeQualifiedName: "M.foo", line: 3, column: 3 },
       { calleeQualifiedName: "obj:foo", line: 4, column: 3 },
       { calleeQualifiedName: "print", line: 5, column: 3 },
+    ]);
+  });
+
+  it("提取静态和动态 require 表达式", () => {
+    const source = [
+      'local M = require("foo.bar")',
+      'require("plain.module")',
+      'local D = require("base." .. name)',
+      'local skipped = "-- require(\\"comment\\")"',
+      '-- require("commented")',
+    ].join("\n");
+
+    const file = parseLuaFile("src/main.lua", source);
+
+    expect(file.requires).toEqual([
+      {
+        type: "Require",
+        filePath: "src/main.lua",
+        moduleName: "foo.bar",
+        isStatic: true,
+        line: 1,
+        column: 11,
+      },
+      {
+        type: "Require",
+        filePath: "src/main.lua",
+        moduleName: "plain.module",
+        isStatic: true,
+        line: 2,
+        column: 1,
+      },
+      {
+        type: "Require",
+        filePath: "src/main.lua",
+        moduleName: '"base." .. name',
+        isStatic: false,
+        line: 3,
+        column: 11,
+      },
     ]);
   });
 

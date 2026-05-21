@@ -35,6 +35,8 @@ describe("indexProject", () => {
       symbolCount: 2,
       containsCount: 2,
       callsCount: 0,
+      extendsCount: 0,
+      requiresCount: 0,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
   });
@@ -110,8 +112,40 @@ describe("indexProject", () => {
       symbolCount: 0,
       containsCount: 0,
       callsCount: 0,
+      extendsCount: 0,
+      requiresCount: 0,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
+  });
+
+  it("写入静态和动态 Requires 关系", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(
+      projectRoot,
+      "src/main.lua",
+      ['local util = require("utils")', 'local dynamic = require("base." .. name)'].join("\n"),
+    );
+    await writeLuaFile(projectRoot, "src/utils.lua", "local M = {}\nreturn M\n");
+
+    await initializeProject(projectRoot);
+
+    const result = await indexProject(projectRoot);
+
+    expect(result.requiresCount).toBe(2);
+    await expect(readRequires(projectRoot)).resolves.toEqual([
+      {
+        source: "src/main.lua",
+        target: "src/main.lua",
+        moduleName: '"base." .. name',
+        isResolved: false,
+      },
+      {
+        source: "src/main.lua",
+        target: "src/utils.lua",
+        moduleName: "utils",
+        isResolved: true,
+      },
+    ]);
   });
 });
 
@@ -183,6 +217,39 @@ ORDER BY target.qualifiedName;`,
       target: String(row.target),
       line: Number(row.line),
       column: Number(row.callColumn),
+      isResolved: row.isResolved,
+    }));
+  } finally {
+    closeQueryResult(result);
+    await connection.close();
+    await database.close();
+  }
+}
+
+async function readRequires(projectRoot: string): Promise<Record<string, unknown>[]> {
+  const database = new Database(
+    getKuzuDatabasePath(join(projectRoot, ".luagraph/kuzu")),
+    undefined,
+    undefined,
+    true,
+  );
+  const connection = new Connection(database);
+  let result: QueryResult | QueryResult[] | undefined;
+
+  try {
+    result = await connection.query(
+      `MATCH (source:File)-[require:Requires]->(target:File)
+RETURN source.path AS source, target.path AS target,
+  require.moduleName AS moduleName, require.isResolved AS isResolved
+ORDER BY require.isResolved, target.path;`,
+    );
+    const queryResult = Array.isArray(result) ? result[0] : result;
+    const rows = (await queryResult?.getAll()) ?? [];
+
+    return rows.map((row) => ({
+      source: String(row.source),
+      target: String(row.target),
+      moduleName: String(row.moduleName),
       isResolved: row.isResolved,
     }));
   } finally {

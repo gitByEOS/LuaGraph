@@ -48,6 +48,8 @@ describe("syncProject", () => {
       removedFileCount: 1,
       symbolCount: 4,
       containsCount: 4,
+      extendsCount: 0,
+      requiresCount: 0,
       databaseDir: join(projectRoot, ".luagraph/kuzu"),
     });
     await expect(getProjectStatus(projectRoot)).resolves.toMatchObject({
@@ -160,6 +162,34 @@ describe("syncProject", () => {
     });
   });
 
+  it("同步后重建 Requires 并移除旧依赖边", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(projectRoot, "src/main.lua", 'local old = require("old")\n');
+    await writeLuaFile(projectRoot, "src/old.lua", "return {}\n");
+    await writeLuaFile(projectRoot, "src/new.lua", "return {}\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    await expect(queryProject(projectRoot, "requires:src/main.lua")).resolves.toMatchObject({
+      nodes: [{ path: "src/old.lua" }],
+    });
+
+    await writeLuaFile(projectRoot, "src/main.lua", 'local new = require("new")\n');
+    await rm(join(projectRoot, "src/old.lua"));
+    await syncProject(projectRoot);
+
+    await expect(queryProject(projectRoot, "requires:src/main.lua")).resolves.toMatchObject({
+      nodes: [{ path: "src/new.lua" }],
+      edges: [{ kind: "Requires", target: "src/new.lua", isResolved: true }],
+    });
+    await expect(queryProject(projectRoot, "dependents:src/old.lua")).resolves.toMatchObject({
+      count: 0,
+      nodes: [],
+      edges: [],
+    });
+  });
+
   it("传入 onProgress 时报告同步进度", async () => {
     const projectRoot = await createTempProject();
     const messages: string[] = [];
@@ -180,7 +210,8 @@ describe("syncProject", () => {
         "同步文件[1/1] player.lua",
         "开始重建 Calls",
         "开始重建 Extends",
-        "完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0，Extends 0",
+        "开始重建 Requires",
+        "完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0，Extends 0，Requires 0",
       ]),
     );
   });
