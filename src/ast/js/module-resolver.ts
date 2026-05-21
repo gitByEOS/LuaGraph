@@ -18,6 +18,10 @@ export type JsModuleResolverOptions = {
 };
 
 const jsExtensions = [".ts", ".tsx", ".js", ".jsx"] as const;
+const tsSourceExtensionsByImportExtension = new Map<string, readonly string[]>([
+  [".js", [".ts", ".tsx"]],
+  [".jsx", [".tsx"]],
+]);
 
 export function resolveJsModulePath(
   sourcePath: NormalizedPath,
@@ -82,8 +86,12 @@ function createCandidates(basePath: string): readonly NormalizedPath[] {
   const extension = nodePath.posix.extname(normalized);
 
   if (jsExtensions.includes(extension as (typeof jsExtensions)[number])) {
+    const sourceExtensions = tsSourceExtensionsByImportExtension.get(extension) ?? [];
+    const withoutExtension = normalized.slice(0, -extension.length);
+
     return [
       normalized as NormalizedPath,
+      ...sourceExtensions.map((item) => `${withoutExtension}${item}` as NormalizedPath),
       ...jsExtensions.map((item) => `${normalized}/index${item}` as NormalizedPath),
     ];
   }

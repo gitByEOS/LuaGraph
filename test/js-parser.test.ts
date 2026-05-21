@@ -91,6 +91,7 @@ describe("JS/TS AST 适配器", () => {
     ] as NormalizedPath[];
 
     expect(resolveJsModulePath("src/main.ts" as NormalizedPath, "./util", files)).toBe("src/util.ts");
+    expect(resolveJsModulePath("src/main.ts" as NormalizedPath, "./util.js", files)).toBe("src/util.ts");
     expect(resolveJsModulePath("src/main.ts" as NormalizedPath, "./feature", files)).toBe("src/feature/index.tsx");
     expect(
       resolveJsModulePath("src/main.ts" as NormalizedPath, "@/shared/helper", files, {

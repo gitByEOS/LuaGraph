@@ -1,6 +1,7 @@
 import type { Connection } from "kuzu";
 import nodePath from "node:path";
 
+import { jsAdapter } from "./js/index.js";
 import { luaAdapter } from "./lua/index.js";
 import type { NormalizedPath, ParsedFile } from "./types.js";
 
@@ -22,7 +23,7 @@ export function getLanguageAdapter(filePath: string): LanguageAdapter {
   }
 
   if (isJavaScriptLikeExtension(extension)) {
-    throw new Error(`JS/TS adapter 尚未接入：${filePath}。请在 src/ast/js 接入 jsAdapter。`);
+    return jsAdapter;
   }
 
   throw new Error(`不支持的源码文件类型：${filePath}`);

@@ -12,11 +12,11 @@ node dist/cli.js <cmd>               # 未 link 时使用本地 CLI。
 ## 项目初始化
 
 ```bash
-luagraph init <lua-project>          # 写入 <lua-project>/.luagraph/config.json。
-luagraph init .                      # 当前目录作为 Lua 项目根。
+luagraph init <project>              # 写入 <project>/.luagraph/config.json。
+luagraph init .                      # 当前目录作为 LuaGraph 项目根。
 ```
 
-`.luagraph/config.json` 控制扫描范围：`include` 默认 `**/*.lua`，`exclude` 默认 `.luagraph/**`。
+`.luagraph/config.json` 控制扫描范围：`include` 默认 `**/*.lua`、`**/*.js`、`**/*.jsx`、`**/*.ts`、`**/*.tsx`，`exclude` 默认跳过 `.luagraph/**`、`**/*.d.ts`、`node_modules/`、`dist/`、`build/`、`coverage/`、`.next/`、`.vite/`。
 
 `.luagraph/kuzu/` 保存图数据库；删除后需重新 `index`。
 
@@ -25,7 +25,7 @@ luagraph init .                      # 当前目录作为 Lua 项目根。
 ```bash
 luagraph index <project> --force     # 删除旧库并重建 File、Symbol、Contains、Calls、Extends、Requires。
 luagraph index <project> --quiet     # 只执行索引，不输出进度。
-luagraph sync <project>              # 按 contentHash 刷新增、修改、删除的 Lua 文件。
+luagraph sync <project>              # 按 contentHash 刷新增、修改、删除的源码文件。
 luagraph status <project>            # 输出节点数、关系数、分类计数、待同步数量。
 luagraph sample <project> --limit 20 # 抽查已写入 Kuzu 的 Symbol。
 ```
@@ -107,12 +107,31 @@ Parser 基于 tree-sitter-lua；动态 require 会保留表达式并写出 `isRe
 
 不支持 upvalue 数据流、运行时 class 工厂、动态 parent 表达式、动态 require 目标解析。
 
+## JS/TS 解析范围
+
+| 能力 | 识别模式 |
+|---|---|
+| class | `class Name {}`、`export class Name {}` |
+| function | `function foo()`、`export function foo()`、函数表达式或箭头函数变量 |
+| method | class 内方法，qualifiedName 为 `Class.method` |
+| extends | `class Child extends Parent` |
+| requires | 静态 `import`、`export ... from`、`require("...")`、`import("...")` |
+
+JS/TS 使用同一个 `jsAdapter`，扫描 `.js`、`.jsx`、`.ts`、`.tsx`，不扫描 `.d.ts`。
+
+路径解析支持相对路径、扩展名省略、目录 `index.ts/index.tsx/index.js/index.jsx`、`tsconfig.json`/`jsconfig.json` 的 `compilerOptions.baseUrl` 与 `paths`。TypeScript 源码中写出的 `.js`/`.jsx` ESM import 会优先匹配真实 `.js`/`.jsx`，也会回退匹配同名 `.ts`/`.tsx` 源文件。
+
+不解析类型专用 import/export，不跟踪变量别名、类型系统、运行时动态模块名和跨包 `node_modules` 依赖。
+
 ## 验证命令
 
 ```bash
 npm run typecheck                   # TypeScript 类型检查。
 npx vitest run                      # 全量单测。
 submit/test-tree-sitter-lua.sh      # tree-sitter 解析和运行时 import 验收。
+submit/test-core-multilang.sh       # 默认多语言扫描范围与 Lua 基线验收。
+submit/test-js-ast.sh               # JS/TS AST adapter 单测验收。
+submit/test-js-ts-art.sh            # 当前项目 JS/TS 全链路索引、查询、影响分析验收。
 submit/test-query.sh                # query 查询验收。
 submit/test-requires.sh             # Requires 最小闭环验收。
 submit/test-extends.sh              # Extends 最小闭环验收。

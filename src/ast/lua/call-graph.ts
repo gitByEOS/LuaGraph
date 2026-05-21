@@ -1,8 +1,9 @@
 import { Connection, type QueryResult } from "kuzu";
 
-import type { ParsedCall, ParsedSymbol } from "../types.js";
+import type { NormalizedPath, ParsedCall, ParsedSymbol } from "../types.js";
 
 export type ParsedCallGraphFile = {
+  readonly path?: NormalizedPath;
   readonly symbols: readonly ParsedSymbol[];
   readonly calls: readonly ParsedCall[];
 };
@@ -11,7 +12,7 @@ export async function rebuildCallsRelationships(
   connection: Connection,
   files: readonly ParsedCallGraphFile[],
 ): Promise<number> {
-  await deleteAllCallsRelationships(connection);
+  await deleteCallsForFiles(connection, files.map(readFilePath).filter(isString));
 
   return insertCallsRelationships(connection, files);
 }
@@ -27,10 +28,6 @@ export async function deleteCallsForFiles(
   for (const path of filePaths) {
     closeResult(await connection.execute(statement, { path }));
   }
-}
-
-async function deleteAllCallsRelationships(connection: Connection): Promise<void> {
-  closeResult(await connection.query("MATCH (:Symbol)-[call:Calls]->(:Symbol) DELETE call;"));
 }
 
 async function insertCallsRelationships(
@@ -169,6 +166,14 @@ function compareSymbolScope(left: ParsedSymbol, right: ParsedSymbol): number {
   const rightSpan = right.endLine - right.startLine;
 
   return leftSpan - rightSpan || right.startLine - left.startLine;
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined;
+}
+
+function readFilePath(file: ParsedCallGraphFile): string | undefined {
+  return file.path ?? file.symbols[0]?.filePath;
 }
 
 function closeResult(result: QueryResult | QueryResult[] | undefined): void {

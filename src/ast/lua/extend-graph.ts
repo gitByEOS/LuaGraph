@@ -1,8 +1,9 @@
 import { Connection, type QueryResult } from "kuzu";
 
-import type { ParsedExtend, ParsedSymbol } from "../types.js";
+import type { NormalizedPath, ParsedExtend, ParsedSymbol } from "../types.js";
 
 export type ParsedExtendsGraphFile = {
+  readonly path?: NormalizedPath;
   readonly symbols: readonly ParsedSymbol[];
   readonly extends: readonly ParsedExtend[];
 };
@@ -11,7 +12,7 @@ export async function rebuildExtendsRelationships(
   connection: Connection,
   files: readonly ParsedExtendsGraphFile[],
 ): Promise<number> {
-  await deleteAllExtendsRelationships(connection);
+  await deleteExtendsForFiles(connection, files.map(readFilePath).filter(isString));
 
   return insertExtendsRelationships(connection, files);
 }
@@ -27,10 +28,6 @@ export async function deleteExtendsForFiles(
   for (const path of filePaths) {
     closeResult(await connection.execute(statement, { path }));
   }
-}
-
-async function deleteAllExtendsRelationships(connection: Connection): Promise<void> {
-  closeResult(await connection.query("MATCH (:Symbol)-[extend:Extends]->(:Symbol) DELETE extend;"));
 }
 
 async function insertExtendsRelationships(
@@ -116,6 +113,14 @@ function resolveSingleLocalSymbol(
   const matches = symbols.filter((symbol) => symbol.qualifiedName === qualifiedName);
 
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined;
+}
+
+function readFilePath(file: ParsedExtendsGraphFile): string | undefined {
+  return file.path ?? file.symbols[0]?.filePath;
 }
 
 function closeResult(result: QueryResult | QueryResult[] | undefined): void {

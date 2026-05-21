@@ -7,7 +7,7 @@ export async function rebuildCallsRelationships(
   connection: Connection,
   files: readonly ParsedFile[],
 ): Promise<number> {
-  await deleteAllCallsRelationships(connection);
+  await deleteCallsForFiles(connection, files.map((file) => file.path));
 
   return insertCallsRelationships(connection, files);
 }
@@ -16,7 +16,7 @@ export async function rebuildExtendsRelationships(
   connection: Connection,
   files: readonly ParsedFile[],
 ): Promise<number> {
-  await deleteAllExtendsRelationships(connection);
+  await deleteExtendsForFiles(connection, files.map((file) => file.path));
 
   return insertExtendsRelationships(connection, files);
 }
@@ -25,7 +25,7 @@ export async function rebuildRequiresRelationships(
   connection: Connection,
   files: readonly ParsedFile[],
 ): Promise<number> {
-  await deleteAllRequiresRelationships(connection);
+  await deleteRequiresForFiles(connection, files.map((file) => file.path));
 
   return insertRequiresRelationships(connection, files);
 }
@@ -67,18 +67,6 @@ export async function deleteRequiresForFiles(
   for (const path of filePaths) {
     closeResult(await connection.execute(statement, { path }));
   }
-}
-
-async function deleteAllCallsRelationships(connection: Connection): Promise<void> {
-  closeResult(await connection.query("MATCH (:Symbol)-[call:Calls]->(:Symbol) DELETE call;"));
-}
-
-async function deleteAllExtendsRelationships(connection: Connection): Promise<void> {
-  closeResult(await connection.query("MATCH (:Symbol)-[extend:Extends]->(:Symbol) DELETE extend;"));
-}
-
-async function deleteAllRequiresRelationships(connection: Connection): Promise<void> {
-  closeResult(await connection.query("MATCH (:File)-[require:Requires]->(:File) DELETE require;"));
 }
 
 async function insertCallsRelationships(connection: Connection, files: readonly ParsedFile[]): Promise<number> {
