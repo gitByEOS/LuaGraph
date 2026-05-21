@@ -56,6 +56,66 @@ describe("queryProject", () => {
     expect(result.nodes[0]).toMatchObject({ type: "Symbol", kind: "function", name: "init" });
   });
 
+  it("查询 Lua class/table 的所有 methods", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "src/slots.lua",
+      [
+        "SlotsControl = {}",
+        "function SlotsControl:oncmd()",
+        "end",
+        "function SlotsControl:requestSpinData()",
+        "end",
+        "function SlotsControl.stop()",
+        "end",
+        "OtherControl = {}",
+        "function OtherControl:oncmd()",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await queryProject(projectRoot, "methods:SlotsControl");
+
+    expect(result.edges).toEqual([]);
+    expect(result.nodes.map((node) => (node.type === "Symbol" ? node.qualifiedName : node.path))).toEqual([
+      "SlotsControl:oncmd",
+      "SlotsControl:requestSpinData",
+      "SlotsControl.stop",
+    ]);
+  });
+
+  it("查询 TS class 的所有 methods", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeProjectFile(
+      projectRoot,
+      "src/query-runner.ts",
+      [
+        "class QueryRunner {",
+        "  run() {}",
+        "  execute() {}",
+        "}",
+        "class OtherRunner {",
+        "  run() {}",
+        "}",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await queryProject(projectRoot, "methods:QueryRunner");
+
+    expect(result.edges).toEqual([]);
+    expect(result.nodes.map((node) => (node.type === "Symbol" ? node.qualifiedName : node.path))).toEqual([
+      "QueryRunner.run",
+      "QueryRunner.execute",
+    ]);
+  });
+
   it("查询 callers", async () => {
     const projectRoot = await createIndexedProject();
     const result = await queryProject(projectRoot, "callers:init");
@@ -354,6 +414,10 @@ async function createTempProject(): Promise<string> {
 }
 
 async function writeLuaFile(projectRoot: string, relativePath: string, content: string): Promise<void> {
+  await writeProjectFile(projectRoot, relativePath, content);
+}
+
+async function writeProjectFile(projectRoot: string, relativePath: string, content: string): Promise<void> {
   const targetPath = join(projectRoot, relativePath);
 
   await mkdir(dirname(targetPath), { recursive: true });

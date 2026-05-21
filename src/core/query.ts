@@ -31,7 +31,12 @@ type ExtendsRelationQueryTerm = {
   readonly value: string;
 };
 
-type RelationQueryTerm = CallRelationQueryTerm | ExtendsRelationQueryTerm | RequireRelationQueryTerm;
+type MethodsRelationQueryTerm = {
+  readonly key: "methods";
+  readonly value: string;
+};
+
+type RelationQueryTerm = CallRelationQueryTerm | ExtendsRelationQueryTerm | RequireRelationQueryTerm | MethodsRelationQueryTerm;
 type QueryTerm = FilterQueryTerm | RelationQueryTerm;
 type RelationKey = RelationQueryTerm["key"];
 type SymbolRelationKey = CallRelationQueryTerm["key"] | ExtendsRelationQueryTerm["key"];
@@ -95,7 +100,7 @@ function parseQueryExpression(expression: string): ParsedExpression {
   }
 
   if (relationTermCount > 1) {
-    throw new Error("query 表达式只能包含一个 callers、callees、extends、subclasses、requires 或 dependents 条件");
+    throw new Error("query 表达式只能包含一个 callers、callees、extends、subclasses、requires、dependents 或 methods 条件");
   }
 
   return { source, terms };
@@ -119,7 +124,8 @@ function parseQueryTerm(token: string): QueryTerm {
     key !== "extends" &&
     key !== "subclasses" &&
     key !== "requires" &&
-    key !== "dependents"
+    key !== "dependents" &&
+    key !== "methods"
   ) {
     throw new Error(`query 不支持条件：${key}`);
   }
@@ -143,6 +149,10 @@ async function executeQuery(
   const relationTerm = expression.terms.find(isRelationTerm);
 
   if (relationTerm !== undefined) {
+    if (isMethodsRelationTerm(relationTerm)) {
+      return executeMethodsQuery(connection, relationTerm);
+    }
+
     if (isRequireRelationTerm(relationTerm)) {
       return executeRequireQuery(connection, relationTerm, depth);
     }
@@ -220,6 +230,30 @@ RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
   );
 
   return rows.map(toSymbolNode);
+}
+
+async function executeMethodsQuery(
+  connection: Connection,
+  relationTerm: MethodsRelationQueryTerm,
+): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
+  const rows = await queryRows(
+    connection,
+    `MATCH (symbol:Symbol)
+WHERE symbol.kind = $kind
+RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
+  symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
+  symbol.startLine AS startLine, symbol.signature AS signature;`,
+    { kind: "method" },
+  );
+  const nodes = rows
+    .map(toSymbolNode)
+    .filter((node) => isMethodOwnedByType(node.qualifiedName, relationTerm.value));
+
+  return { nodes: sortNodes(nodes), edges: [] };
+}
+
+function isMethodOwnedByType(qualifiedName: string, typeName: string): boolean {
+  return qualifiedName.startsWith(`${typeName}:`) || qualifiedName.startsWith(`${typeName}.`);
 }
 
 async function executeRelationQuery(
@@ -577,7 +611,8 @@ function isRelationTerm(term: QueryTerm): term is RelationQueryTerm {
     term.key === "extends" ||
     term.key === "subclasses" ||
     term.key === "requires" ||
-    term.key === "dependents"
+    term.key === "dependents" ||
+    term.key === "methods"
   );
 }
 
@@ -585,6 +620,12 @@ function isRequireRelationTerm(
   term: RelationQueryTerm,
 ): term is RequireRelationQueryTerm {
   return term.key === "requires" || term.key === "dependents";
+}
+
+function isMethodsRelationTerm(
+  term: RelationQueryTerm,
+): term is MethodsRelationQueryTerm {
+  return term.key === "methods";
 }
 
 function edgeKey(edge: QueryEdge): string {

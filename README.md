@@ -73,6 +73,8 @@ luagraph serve [project_root] --port <port> --open
 | Extends | `submit/test-extends.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/format.test.ts && npm run build`，CLI 临时项目验证 Extends 查询 |
 | Requires | `submit/test-requires.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/impact.test.ts test/cli.test.ts && npm run build`，CLI 临时项目验证 requires/dependents/impact |
 | Layout | `submit/test-layout.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/server.test.ts test/web-assets.test.ts && npm run build`，验证目录分层后的公共入口、Lua 适配器和 Web 资产路径 |
+| Explain Data Flow | `submit/test-data-flow.sh` | `npm run build` 后构造 Lua/TS 临时项目，验证 method 输入输出 `Data Flow`，file 输入输出 `Top Method Flow` |
+| Methods Query | `submit/test-methods-query.sh` | `npm run build` 后构造 Lua/TS 临时项目，验证 `query methods:<TypeName>` 返回指定 class/table 的 method |
 
 ## Systems/ 分析（已完成 ✅）
 

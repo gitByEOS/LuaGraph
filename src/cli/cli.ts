@@ -27,6 +27,7 @@ const queryHelpText = `
   subclasses:<symbol>        查询继承该符号的子级
   requires:<path-part>       查询路径片段匹配的文件 require 了哪些项目内文件
   dependents:<path-part>     查询哪些文件 require 了路径片段匹配的文件
+  methods:<TypeName>         查询某个 class/table 的所有 method
   kind:<kind> name:<symbol>  组合过滤
 
 示例:
@@ -38,6 +39,7 @@ const queryHelpText = `
   luagraph query subclasses:Base --depth 2 --format tree
   luagraph query requires:src/main.lua --format json
   luagraph query dependents:src/utils.lua --format json
+  luagraph query methods:SlotsControl --format table
   luagraph query kind:method name:collectMaterial --format table
 `;
 

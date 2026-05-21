@@ -110,6 +110,7 @@ node /Users/bole/dev/mul-agents/LuaGraph/master/dist/cli.js explain src/core/sto
 
 当前不足：
 
-- `Entry Points` 仍会把低入度私有函数当入口。
-- `External Contracts` 还没完整展示所有导入符号。
-- `explain text` 不展开 Cypher、DTO 字段、错误路径和资源关闭细节。
+- TS 文件输入的 `Entry Points` 会保留低入度函数，信息量足但噪音仍偏高。
+- `External Contracts` 仍只展示模块级依赖和跨文件调用，还没完整展示具名导入符号。
+- `Data Flow` 是目标函数的源码摘要，不是完整 SSA/变量级跨函数数据流。
+- file 输入现在输出 `Top Method Flow`，用于挑选下一步应 explain 的函数或方法。
