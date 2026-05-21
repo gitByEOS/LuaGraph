@@ -84,11 +84,44 @@ describe("queryProject", () => {
       "M.foo",
       "obj:foo",
     ]);
-    expect(result.edges.map((edge) => [edge.line, edge.column, edge.isResolved])).toEqual([
+    const callEdges = result.edges.filter((edge) => edge.kind === "Calls");
+
+    expect(callEdges.map((edge) => [edge.line, edge.column, edge.isResolved])).toEqual([
       [9, 3, true],
       [10, 3, true],
       [11, 3, true],
     ]);
+  });
+
+  it("查询 extends 和 subclasses", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "src/inherit.lua",
+      [
+        "Base = {}",
+        "Child = setmetatable({}, { __index = Base })",
+        "GrandChild = setmetatable({}, { __index = Child })",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const parentResult = await queryProject(projectRoot, "extends:Child");
+    const childResult = await queryProject(projectRoot, "subclasses:Child");
+
+    expect(parentResult.nodes.map((node) => (node.type === "Symbol" ? node.qualifiedName : node.path))).toEqual([
+      "Base",
+    ]);
+    expect(parentResult.edges).toEqual([
+      expect.objectContaining({ kind: "Extends" }),
+    ]);
+    expect(childResult.nodes.map((node) => (node.type === "Symbol" ? node.qualifiedName : node.path))).toEqual([
+      "GrandChild",
+    ]);
+    expect(childResult.edges[0]?.source).toContain("#class#GrandChild#");
+    expect(childResult.edges[0]?.target).toContain("#class#Child#");
   });
 });
 

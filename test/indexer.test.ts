@@ -73,6 +73,33 @@ describe("indexProject", () => {
     ]);
   });
 
+  it("写入可解析的 Extends 关系", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(
+      projectRoot,
+      "src/inherit.lua",
+      [
+        "Parent = {}",
+        "Child = setmetatable({}, { __index = Parent })",
+        "Self.__index = Self",
+        "Dynamic = setmetatable({}, { __index = getParent() })",
+      ].join("\n"),
+    );
+
+    await initializeProject(projectRoot);
+
+    const result = await indexProject(projectRoot);
+
+    expect(result).toMatchObject({
+      fileCount: 1,
+      symbolCount: 2,
+      containsCount: 2,
+    });
+    await expect(readExtends(projectRoot)).resolves.toEqual([
+      { child: "Child", parent: "Parent" },
+    ]);
+  });
+
   it("对空项目返回零计数", async () => {
     const projectRoot = await createTempProject();
 
@@ -99,6 +126,36 @@ async function writeLuaFile(projectRoot: string, relativePath: string, content: 
 
   await mkdir(join(targetPath, ".."), { recursive: true });
   await writeFile(targetPath, content, "utf8");
+}
+
+async function readExtends(projectRoot: string): Promise<Record<string, unknown>[]> {
+  const database = new Database(
+    getKuzuDatabasePath(join(projectRoot, ".luagraph/kuzu")),
+    undefined,
+    undefined,
+    true,
+  );
+  const connection = new Connection(database);
+  let result: QueryResult | QueryResult[] | undefined;
+
+  try {
+    result = await connection.query(
+      `MATCH (child:Symbol)-[extend:Extends]->(parent:Symbol)
+RETURN child.qualifiedName AS child, parent.qualifiedName AS parent
+ORDER BY child.qualifiedName;`,
+    );
+    const queryResult = Array.isArray(result) ? result[0] : result;
+    const rows = (await queryResult?.getAll()) ?? [];
+
+    return rows.map((row) => ({
+      child: String(row.child),
+      parent: String(row.parent),
+    }));
+  } finally {
+    closeQueryResult(result);
+    await connection.close();
+    await database.close();
+  }
 }
 
 async function readCalls(projectRoot: string): Promise<Record<string, unknown>[]> {

@@ -76,6 +76,22 @@ describe("graph output formatters", () => {
     );
   });
 
+  it("extends table 和 tree 展示继承关系", () => {
+    expect(formatQueryResult(createExtendsResult(), "table")).toBe(
+      [
+        "+--------+-------+--------------+------+-----------+",
+        "| Parent | Kind  | File         | Line | Signature |",
+        "+--------+-------+--------------+------+-----------+",
+        "| Base   | table | src/base.lua | 1    | Base = {} |",
+        "+--------+-------+--------------+------+-----------+",
+        "1 rows, target: Child (src/child.lua:1)",
+      ].join("\n"),
+    );
+    expect(formatQueryResult(createExtendsResult(), "tree")).toBe(
+      ["Child()  (src/child.lua:1)", "└── extends Base [src/base.lua:1]"].join("\n"),
+    );
+  });
+
   it("普通 query table 使用通用 ASCII 表格", () => {
     expect(formatQueryResult(createNameQueryResult(), "table")).toBe(
       [
@@ -231,6 +247,23 @@ function createNameQueryResult(): LuaGraphQueryResult {
   };
 }
 
+function createExtendsResult(): LuaGraphQueryResult {
+  const child = createSymbol("src/child.lua#class#Child#1:1", "Child", "src/child.lua", 1);
+  const base = {
+    ...createSymbol("src/base.lua#table#Base#1:1", "Base", "src/base.lua", 1),
+    kind: "table" as const,
+    signature: "Base = {}",
+  };
+
+  return {
+    projectRoot: "/tmp/project",
+    expression: "extends:Child",
+    count: 1,
+    nodes: [base],
+    edges: [createExtendsEdge(child.id, base.id)],
+  };
+}
+
 function createImpactResult(): LuaGraphImpactResult {
   const leaf = createSymbol("src/api.lua#function#leaf#1:1", "leaf", "src/api.lua", 1);
   const middle = createSymbol("src/api.lua#function#middle#3:1", "middle", "src/api.lua", 3);
@@ -272,5 +305,13 @@ function createEdge(source: string, target: string, line: number) {
     line,
     column: 3,
     isResolved: true,
+  };
+}
+
+function createExtendsEdge(source: string, target: string) {
+  return {
+    kind: "Extends" as const,
+    source,
+    target,
   };
 }

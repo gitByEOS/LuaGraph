@@ -1,7 +1,7 @@
 import type {
   LuaGraphImpactResult,
   LuaGraphQueryResult,
-  QueryCallEdge,
+  QueryEdge,
   QueryNode,
   QuerySymbolNode,
 } from "./types.js";
@@ -36,17 +36,33 @@ function formatQueryTable(result: LuaGraphQueryResult): string {
   const relation = parseRelationExpression(result.expression);
 
   if (relation !== undefined) {
-    const title = relation.key === "callers" ? "Caller" : "Callee";
-    const rows = getRelationRows(relation.key, getSymbolNodes(result.nodes), result.edges).map(({ edge, node }) => [
+    if (isCallRelation(relation.key)) {
+      const title = relation.key === "callers" ? "Caller" : "Callee";
+      const rows = getRelationRows(relation.key, getSymbolNodes(result.nodes), result.edges).map(({ edge, node }) => [
+        node.qualifiedName,
+        node.kind,
+        node.filePath,
+        edge.kind === "Calls" ? edge.line : "",
+        edge.kind === "Calls" ? edge.column : "",
+      ]);
+      const target = formatTargetSummary(relation.value, getRelationRoots(relation.key, result.nodes, result.edges)[0]);
+
+      return [renderAsciiTable([title, "Kind", "File", "Line", "Col"], rows), `${rows.length} rows, target: ${target}`].join(
+        "\n",
+      );
+    }
+
+    const title = relation.key === "extends" ? "Parent" : "Subclass";
+    const rows = getRelationRows(relation.key, getSymbolNodes(result.nodes), result.edges).map(({ node }) => [
       node.qualifiedName,
       node.kind,
       node.filePath,
-      edge.line,
-      edge.column,
+      node.startLine,
+      node.signature,
     ]);
     const target = formatTargetSummary(relation.value, getRelationRoots(relation.key, result.nodes, result.edges)[0]);
 
-    return [renderAsciiTable([title, "Kind", "File", "Line", "Col"], rows), `${rows.length} rows, target: ${target}`].join(
+    return [renderAsciiTable([title, "Kind", "File", "Line", "Signature"], rows), `${rows.length} rows, target: ${target}`].join(
       "\n",
     );
   }
@@ -118,6 +134,7 @@ function formatImpactTree(result: LuaGraphImpactResult): string {
 }
 
 type TableValue = number | string;
+type RelationKey = "callers" | "callees" | "extends" | "subclasses";
 
 type RelationRoot = {
   readonly id: string;
@@ -127,7 +144,7 @@ type RelationRoot = {
 
 type RelationRow = {
   readonly node: QuerySymbolNode;
-  readonly edge: QueryCallEdge;
+  readonly edge: QueryEdge;
 };
 
 type TreeNode = {
@@ -169,21 +186,21 @@ function asciiWidth(value: string): number {
 }
 
 function renderRelationTree(
-  relation: "callers" | "callees",
+  relation: RelationKey,
   rootLabel: string,
   rootId: string,
   nodes: Map<string, QuerySymbolNode>,
-  edges: readonly QueryCallEdge[],
+  edges: readonly QueryEdge[],
 ): string {
   return renderTree(buildRelationTree(relation, rootLabel, rootId, nodes, edges, new Set([rootId])));
 }
 
 function buildRelationTree(
-  relation: "callers" | "callees",
+  relation: RelationKey,
   label: string,
   originId: string,
   nodes: Map<string, QuerySymbolNode>,
-  edges: readonly QueryCallEdge[],
+  edges: readonly QueryEdge[],
   path: ReadonlySet<string>,
 ): TreeNode {
   const children = getRelationChildren(relation, originId, nodes, edges).map(({ edge, node }) =>
@@ -194,16 +211,15 @@ function buildRelationTree(
 }
 
 function buildRelationChild(
-  relation: "callers" | "callees",
-  edge: QueryCallEdge,
+  relation: RelationKey,
+  edge: QueryEdge,
   node: QuerySymbolNode,
   nodes: Map<string, QuerySymbolNode>,
-  edges: readonly QueryCallEdge[],
+  edges: readonly QueryEdge[],
   path: ReadonlySet<string>,
 ): TreeNode {
-  const prefix = relation === "callers" ? "called by" : "calls";
   const marker = path.has(node.id) ? " (cycle)" : "";
-  const label = `${prefix} ${formatCallableName(node.qualifiedName)} [${node.filePath}:${edge.line}]${marker}`;
+  const label = `${formatRelationChildLabel(relation, edge, node)}${marker}`;
 
   if (path.has(node.id)) {
     return { label, children: [] };
@@ -227,39 +243,42 @@ function renderTreeChildren(children: readonly TreeNode[], prefix: string): stri
 }
 
 function getRelationRows(
-  relation: "callers" | "callees",
+  relation: RelationKey,
   nodes: Map<string, QuerySymbolNode>,
-  edges: readonly QueryCallEdge[],
+  edges: readonly QueryEdge[],
 ): RelationRow[] {
   return edges
-    .map((edge) => ({ edge, node: nodes.get(relation === "callers" ? edge.source : edge.target) }))
+    .filter((edge) => isEdgeForRelation(relation, edge))
+    .map((edge) => ({ edge, node: nodes.get(getRelationNodeId(relation, edge)) }))
     .filter((entry): entry is RelationRow => isSymbolNode(entry.node))
     .sort((left, right) => compareSymbols(left.node, right.node));
 }
 
 function getRelationChildren(
-  relation: "callers" | "callees",
+  relation: RelationKey,
   originId: string,
   nodes: Map<string, QuerySymbolNode>,
-  edges: readonly QueryCallEdge[],
+  edges: readonly QueryEdge[],
 ): RelationRow[] {
   return edges
-    .filter((edge) => (relation === "callers" ? edge.target === originId : edge.source === originId))
-    .map((edge) => ({ edge, node: nodes.get(relation === "callers" ? edge.source : edge.target) }))
+    .filter((edge) => isEdgeForRelation(relation, edge))
+    .filter((edge) => (isReverseRelation(relation) ? edge.target === originId : edge.source === originId))
+    .map((edge) => ({ edge, node: nodes.get(getRelationNodeId(relation, edge)) }))
     .filter((entry): entry is RelationRow => isSymbolNode(entry.node))
     .sort((left, right) => compareSymbols(left.node, right.node));
 }
 
 function getRelationRoots(
-  relation: "callers" | "callees",
+  relation: RelationKey,
   nodes: readonly QueryNode[],
-  edges: readonly QueryCallEdge[],
+  edges: readonly QueryEdge[],
 ): RelationRoot[] {
   const symbols = getSymbolNodes(nodes);
   const rootIds = [
     ...new Set(
       edges
-        .map((edge) => (relation === "callers" ? edge.target : edge.source))
+        .filter((edge) => isEdgeForRelation(relation, edge))
+        .map((edge) => (isReverseRelation(relation) ? edge.target : edge.source))
         .filter((id) => !symbols.has(id)),
     ),
   ].sort();
@@ -288,7 +307,7 @@ function parseSymbolId(id: string): { readonly filePath: string; readonly line: 
 
 function parseRelationExpression(
   expression: string,
-): { readonly key: "callers" | "callees"; readonly value: string } | undefined {
+): { readonly key: RelationKey; readonly value: string } | undefined {
   const relation = expression.split(/\s+/).map(parseExpressionPart).find(isRelationPart);
 
   if (relation === undefined) {
@@ -315,8 +334,8 @@ function parseExpressionPart(
 
 function isRelationPart(
   part: { readonly key: string; readonly value: string } | undefined,
-): part is { readonly key: "callers" | "callees"; readonly value: string } {
-  return part?.key === "callers" || part?.key === "callees";
+): part is { readonly key: RelationKey; readonly value: string } {
+  return part?.key === "callers" || part?.key === "callees" || part?.key === "extends" || part?.key === "subclasses";
 }
 
 function getSymbolNodes(nodes: readonly QueryNode[]): Map<string, QuerySymbolNode> {
@@ -353,6 +372,34 @@ function formatTargetSummary(target: string, root: RelationRoot | undefined): st
 
 function formatCallableName(name: string): string {
   return name.endsWith(")") ? name : `${name}()`;
+}
+
+function formatRelationChildLabel(relation: RelationKey, edge: QueryEdge, node: QuerySymbolNode): string {
+  if (edge.kind === "Calls") {
+    const prefix = relation === "callers" ? "called by" : "calls";
+
+    return `${prefix} ${formatCallableName(node.qualifiedName)} [${node.filePath}:${edge.line}]`;
+  }
+
+  const prefix = relation === "extends" ? "extends" : "subclass";
+
+  return `${prefix} ${node.qualifiedName} [${node.filePath}:${node.startLine}]`;
+}
+
+function isCallRelation(relation: RelationKey): boolean {
+  return relation === "callers" || relation === "callees";
+}
+
+function isReverseRelation(relation: RelationKey): boolean {
+  return relation === "callers" || relation === "subclasses";
+}
+
+function isEdgeForRelation(relation: RelationKey, edge: QueryEdge): boolean {
+  return isCallRelation(relation) ? edge.kind === "Calls" : edge.kind === "Extends";
+}
+
+function getRelationNodeId(relation: RelationKey, edge: QueryEdge): string {
+  return isReverseRelation(relation) ? edge.source : edge.target;
 }
 
 function compareSymbols(left: QuerySymbolNode, right: QuerySymbolNode): number {

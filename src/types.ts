@@ -26,6 +26,7 @@ export type LuaFile = {
   readonly path: NormalizedPath;
   readonly symbols: readonly LuaSymbol[];
   readonly calls: readonly LuaCall[];
+  readonly extends: readonly LuaExtend[];
 };
 
 export type LuaSymbol = {
@@ -49,6 +50,15 @@ export type LuaCall = {
   readonly type: "Call";
   readonly filePath: NormalizedPath;
   readonly calleeQualifiedName: string;
+  readonly line: number;
+  readonly column: number;
+};
+
+export type LuaExtend = {
+  readonly type: "Extends";
+  readonly filePath: NormalizedPath;
+  readonly childQualifiedName: string;
+  readonly parentQualifiedName: string;
   readonly line: number;
   readonly column: number;
 };
@@ -141,12 +151,20 @@ export type QueryCallEdge = {
   readonly isResolved: boolean;
 };
 
+export type QueryExtendsEdge = {
+  readonly kind: "Extends";
+  readonly source: string;
+  readonly target: string;
+};
+
+export type QueryEdge = QueryCallEdge | QueryExtendsEdge;
+
 export type LuaGraphQueryResult = {
   readonly projectRoot: string;
   readonly expression: string;
   readonly count: number;
   readonly nodes: readonly QueryNode[];
-  readonly edges: readonly QueryCallEdge[];
+  readonly edges: readonly QueryEdge[];
 };
 
 export type ImpactSeed = QuerySymbolNode;

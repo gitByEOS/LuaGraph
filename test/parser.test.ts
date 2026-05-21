@@ -88,6 +88,7 @@ describe("Lua parser Phase 1 最小提取", () => {
           isUnresolved: false,
         },
       ],
+      extends: [],
       calls: [
         {
           type: "Call",
@@ -248,6 +249,42 @@ describe("Lua parser Phase 1 最小提取", () => {
         startLine: 21,
         endLine: 25,
         signature: "local function nestedBonus()",
+      },
+    ]);
+  });
+
+  it("提取 setmetatable 的确定继承关系", () => {
+    const source = [
+      "Parent = {}",
+      "local Child = setmetatable({}, { __index = Parent })",
+      "GrandChild = setmetatable({}, { __index = Child })",
+      "T.__index = T",
+      "Dynamic = setmetatable({}, { __index = getParent() })",
+    ].join("\n");
+
+    const file = parseLuaFile("src/inherit.lua", source);
+
+    expect(file.symbols.map((symbol) => [symbol.kind, symbol.qualifiedName, symbol.isLocal])).toEqual([
+      ["table", "Parent", false],
+      ["class", "Child", true],
+      ["class", "GrandChild", false],
+    ]);
+    expect(file.extends).toEqual([
+      {
+        type: "Extends",
+        filePath: "src/inherit.lua",
+        childQualifiedName: "Child",
+        parentQualifiedName: "Parent",
+        line: 2,
+        column: 1,
+      },
+      {
+        type: "Extends",
+        filePath: "src/inherit.lua",
+        childQualifiedName: "GrandChild",
+        parentQualifiedName: "Child",
+        line: 3,
+        column: 1,
       },
     ]);
   });

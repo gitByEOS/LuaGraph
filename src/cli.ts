@@ -22,6 +22,8 @@ const queryHelpText = `
   kind:<kind>                按类型查询，如 class、function、method、file
   callers:<symbol>           查询谁调用了该符号，用于看影响范围
   callees:<symbol>           查询该符号调用了谁，用于看内部依赖
+  extends:<symbol>           查询该符号继承的父级
+  subclasses:<symbol>        查询继承该符号的子级
   kind:<kind> name:<symbol>  组合过滤
 
 示例:
@@ -29,6 +31,8 @@ const queryHelpText = `
   luagraph query kind:class --format table
   luagraph query callers:ThemeCollectDialog --depth 2 --format tree
   luagraph query callees:ThemeProgressDialog:collectMaterial --depth 2 --format tree
+  luagraph query extends:Child --format table
+  luagraph query subclasses:Base --depth 2 --format tree
   luagraph query kind:method name:collectMaterial --format table
 `;
 

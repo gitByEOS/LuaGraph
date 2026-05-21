@@ -6,6 +6,7 @@ import { Connection, Database, type QueryResult } from "kuzu";
 
 import { deleteCallsForFiles, rebuildCallsRelationships } from "./call-graph.js";
 import { configPath, readConfig } from "./config.js";
+import { deleteExtendsForFiles, rebuildExtendsRelationships } from "./extend-graph.js";
 import { parseLuaFile } from "./parser.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
@@ -68,17 +69,19 @@ export async function syncProject(
     ];
 
     await deleteCallsForFiles(connection, affectedFilePaths);
+    await deleteExtendsForFiles(connection, affectedFilePaths);
     await removeIndexedFiles(connection, affectedFilePaths);
     await writeChangedFiles(connection, changedFiles, options);
     let callsCount = 0;
+    let extendsCount = 0;
     if (affectedFilePaths.length > 0) {
       reportProgress(options, "开始重建 Calls");
-      callsCount = await rebuildCallsRelationships(
-        connection,
-        currentFiles.map((file) => parseLuaFile(file.file.path, file.content)),
-      );
+      const parsedFiles = currentFiles.map((file) => parseLuaFile(file.file.path, file.content));
+      callsCount = await rebuildCallsRelationships(connection, parsedFiles);
+      reportProgress(options, "开始重建 Extends");
+      extendsCount = await rebuildExtendsRelationships(connection, parsedFiles);
     } else {
-      reportProgress(options, "跳过重建 Calls：无变更文件");
+      reportProgress(options, "跳过重建 Calls/Extends：无变更文件");
     }
 
     const symbolCount = await countQuery(connection, "MATCH (symbol:Symbol) RETURN count(symbol) AS count;");
@@ -88,7 +91,7 @@ export async function syncProject(
     );
     reportProgress(
       options,
-      `完成统计：扫描 ${files.length}，刷新 ${changedFiles.length}，删除 ${removedFilePaths.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}`,
+      `完成统计：扫描 ${files.length}，刷新 ${changedFiles.length}，删除 ${removedFilePaths.length}，符号 ${symbolCount}，Contains ${containsCount}，Calls ${callsCount}，Extends ${extendsCount}`,
     );
 
     return {

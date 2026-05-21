@@ -49,7 +49,7 @@ luagraph init .
 
 ### 2. 索引 Lua 符号
 
-扫描指定模式的 Lua 文件，提取 class/table/function/method 符号和可解析 Calls 关系并写入 Kuzu：
+扫描指定模式的 Lua 文件，提取 class/table/function/method 符号、可解析 Calls 关系和确定的 Extends 关系并写入 Kuzu：
 
 ```bash
 # 索引目标项目
@@ -72,7 +72,7 @@ luagraph index /path/to/your/lua/project --force --format json
 
 ### 3. 增量刷新索引
 
-`sync` 基于 contentHash 处理新增、变更和删除的 Lua 文件，并刷新相关 Symbol、Contains 和 Calls 数据。无参数时默认使用当前目录：
+`sync` 基于 contentHash 处理新增、变更和删除的 Lua 文件，并刷新相关 Symbol、Contains、Calls 和 Extends 数据。无参数时默认使用当前目录：
 
 ```bash
 luagraph sync
@@ -153,7 +153,7 @@ luagraph status --project-root /path/to/your/lua/project
 
 ### 6. 查询图数据
 
-`query` 读取已索引图，支持按名称、类型和 Calls 关系查询。表达式可以组合普通过滤条件；关系条件一次只使用一个：
+`query` 读取已索引图，支持按名称、类型、Calls 和 Extends 关系查询。表达式可以组合普通过滤条件；关系条件一次只使用一个：
 
 ```bash
 luagraph query name:init
@@ -161,13 +161,15 @@ luagraph query kind:function
 luagraph query kind:file
 luagraph query callers:init --depth 2
 luagraph query callees:init --format tree
+luagraph query extends:Child --format table
+luagraph query subclasses:Base --depth 2 --format tree
 luagraph query name:init --project-root /path/to/your/lua/project --format table
 ```
 
 支持的输出格式：
-- `json`：结构化结果，包含 `nodes` 和 `edges`。
+- `json`：结构化结果，包含 `nodes` 和 `edges`，Extends 边会以 `kind: "Extends"` 输出。
 - `table`：逐行输出匹配节点，便于终端阅读。
-- `tree`：按 callers/callees 关系展示层级，循环节点会标记 `(cycle)`。
+- `tree`：按 callers/callees/extends/subclasses 关系展示层级，循环节点会标记 `(cycle)`。
 
 ### 7. 分析影响范围
 
@@ -212,7 +214,8 @@ node dist/cli.js serve /path/to/your/lua/project --port 43210 --open
 当前限制：
 - 需要先执行 `init` 和 `index`，索引刷新由 CLI `sync` 执行。
 - Web 仍以 File、Symbol、Contains 和源码片段为主。
-- 不承诺 v0.8 规划中的 upvalue、Requires、Extends 或动态 require 分析。
+- Extends 仅识别确定的 `Child = setmetatable({}, { __index = Parent })` 和 `local Child = ...` 模式。
+- 不承诺 upvalue、Requires 或动态 require 分析。
 - 不提供前端构建链，不监听文件变化。
 
 ### 9. 完整工作流示例
@@ -282,6 +285,7 @@ submit/test-parser-accuracy.sh # parser 准确性验收
 submit/test-sync-refresh.sh    # sync 增量刷新验收
 submit/test-query.sh           # query 查询验收
 submit/test-impact.sh          # impact 与格式验收
+submit/test-extends.sh         # Extends 最小闭环验收
 ```
 
 ### 快速验证（最快）
@@ -305,7 +309,7 @@ submit/test-agent-verify.sh
 | Contains | 文件→符号 | — |
 | Calls | 符号→符号（调用） | line, column, isResolved |
 | Requires | schema 预留关系表，当前解析流程不写入 | moduleName, isResolved |
-| Extends | schema 预留关系表，当前解析流程不写入 | — |
+| Extends | 符号→父级符号（最小继承） | — |
 
 ## Parser 当前支持的符号类型
 
@@ -318,4 +322,4 @@ submit/test-agent-verify.sh
 | Function | `function foo()` | function |
 | Local Function | `local function foo()` | function |
 
-Parser 使用行级模式，不读取 AST。当前不承诺 upvalue、Requires、Extends 或动态 require 分析。
+Parser 使用行级模式，不读取 AST。Extends 仅识别 `Child = setmetatable({}, { __index = Parent })` 与 `local Child = ...` 的确定符号关系；`T.__index = T` 和动态 parent 表达式不会生成确定继承边。当前不承诺 upvalue、Requires 或动态 require 分析。

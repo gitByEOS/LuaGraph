@@ -1,5 +1,5 @@
 import { normalizeRepositoryPath } from "./path.js";
-import type { LuaCall, LuaFile, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
+import type { LuaCall, LuaExtend, LuaFile, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
 
 type SymbolDraft = {
   readonly kind: SymbolKind;
@@ -21,6 +21,8 @@ type FunctionScope = {
 const classPattern =
   /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*class\s*\(\s*["'](?<literal>[A-Za-z_][A-Za-z0-9_]*)["']/;
 const tablePattern = /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\{|$)/;
+const setmetatableExtendsPattern =
+  /^(?<indent>\s*)(?<local>local\s+)?(?<child>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*setmetatable\s*\(\s*\{\s*\}\s*,\s*\{\s*__index\s*=\s*(?<parent>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\s*\)/;
 const functionPattern =
   /^(?<indent>\s*)(?<local>local\s+)?function\s+(?<qualifiedName>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/;
 const callPattern = /(?<![A-Za-z0-9_])(?<callee>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/g;
@@ -30,12 +32,14 @@ export function parseLuaFile(pathValue: string, source: string): LuaFile {
   const filePath = normalizeRepositoryPath(pathValue);
   const symbols = extractLuaSymbols(filePath, source);
   const calls = extractLuaCalls(filePath, source);
+  const extendsRelationships = extractLuaExtends(filePath, source);
 
   return {
     type: "File",
     path: filePath,
     symbols,
     calls,
+    extends: extendsRelationships,
   };
 }
 
@@ -50,6 +54,12 @@ export function extractLuaCalls(filePath: NormalizedPath, source: string): reado
   return source
     .split(/\r\n|\n|\r/)
     .flatMap((line, index) => parseCallLine(filePath, stripLuaLine(line), index + 1));
+}
+
+export function extractLuaExtends(filePath: NormalizedPath, source: string): readonly LuaExtend[] {
+  return source
+    .split(/\r\n|\n|\r/)
+    .flatMap((line, index) => parseExtendsLine(filePath, stripLuaLine(line), index + 1));
 }
 
 function extractSymbolDrafts(lines: readonly string[]): readonly SymbolDraft[] {
@@ -79,6 +89,12 @@ function extractSymbolDrafts(lines: readonly string[]): readonly SymbolDraft[] {
 }
 
 function parseLine(line: string, lineNumber: number): readonly SymbolDraft[] {
+  const extendsClassSymbol = parseSetmetatableExtendsLine(line, lineNumber);
+
+  if (extendsClassSymbol !== undefined) {
+    return [extendsClassSymbol];
+  }
+
   const classSymbol = parseClassLine(line, lineNumber);
 
   if (classSymbol !== undefined) {
@@ -121,6 +137,36 @@ function parseCallLine(
   return calls;
 }
 
+function parseExtendsLine(
+  filePath: NormalizedPath,
+  strippedLine: string,
+  lineNumber: number,
+): readonly LuaExtend[] {
+  const match = setmetatableExtendsPattern.exec(strippedLine);
+
+  if (match?.groups === undefined) {
+    return [];
+  }
+
+  const child = match.groups.child;
+  const parent = match.groups.parent;
+
+  if (child === undefined || parent === undefined || child === parent) {
+    return [];
+  }
+
+  return [
+    {
+      type: "Extends",
+      filePath,
+      childQualifiedName: child,
+      parentQualifiedName: parent,
+      line: lineNumber,
+      column: getDeclarationColumn(match.groups.indent),
+    },
+  ];
+}
+
 function isDeclarationCallMatch(line: string, callIndex: number): boolean {
   return /\bfunction\s+$/.test(line.slice(0, callIndex));
 }
@@ -148,6 +194,32 @@ function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefin
     endColumn: line.length,
     signature: line.trim(),
     isLocal: false,
+  };
+}
+
+function parseSetmetatableExtendsLine(line: string, lineNumber: number): SymbolDraft | undefined {
+  const match = setmetatableExtendsPattern.exec(stripLuaLine(line));
+
+  if (match?.groups === undefined) {
+    return undefined;
+  }
+
+  const child = match.groups.child;
+
+  if (child === undefined) {
+    return undefined;
+  }
+
+  return {
+    kind: "class",
+    name: child,
+    qualifiedName: child,
+    startLine: lineNumber,
+    endLine: lineNumber,
+    startColumn: getDeclarationColumn(match.groups.indent),
+    endColumn: line.length,
+    signature: line.trim(),
+    isLocal: match.groups.local !== undefined,
   };
 }
 

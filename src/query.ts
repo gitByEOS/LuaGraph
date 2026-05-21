@@ -5,20 +5,22 @@ import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { LuaGraphQueryResult, QueryCallEdge, QueryNode, QuerySymbolNode } from "./types.js";
+import type { LuaGraphQueryResult, QueryEdge, QueryNode, QuerySymbolNode } from "./types.js";
 
 export type QueryProjectOptions = {
   readonly depth?: number;
 };
 
 type QueryTerm = {
-  readonly key: "name" | "kind" | "callers" | "callees";
+  readonly key: "name" | "kind" | RelationKey;
   readonly value: string;
 };
 
 type RelationQueryTerm = QueryTerm & {
-  readonly key: "callers" | "callees";
+  readonly key: RelationKey;
 };
+
+type RelationKey = "callers" | "callees" | "extends" | "subclasses";
 
 type ParsedExpression = {
   readonly source: string;
@@ -79,7 +81,7 @@ function parseQueryExpression(expression: string): ParsedExpression {
   }
 
   if (relationTermCount > 1) {
-    throw new Error("query 表达式只能包含一个 callers 或 callees 条件");
+    throw new Error("query 表达式只能包含一个 callers、callees、extends 或 subclasses 条件");
   }
 
   return { source, terms };
@@ -95,7 +97,14 @@ function parseQueryTerm(token: string): QueryTerm {
   const key = token.slice(0, separatorIndex);
   const value = token.slice(separatorIndex + 1);
 
-  if (key !== "name" && key !== "kind" && key !== "callers" && key !== "callees") {
+  if (
+    key !== "name" &&
+    key !== "kind" &&
+    key !== "callers" &&
+    key !== "callees" &&
+    key !== "extends" &&
+    key !== "subclasses"
+  ) {
     throw new Error(`query 不支持条件：${key}`);
   }
 
@@ -201,7 +210,7 @@ async function executeRelationQuery(
 ): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
   const seeds = await querySeedSymbols(connection, relationTerm.value);
   const nodesById = new Map<string, QuerySymbolNode>();
-  const edgesByKey = new Map<string, QueryCallEdge>();
+  const edgesByKey = new Map<string, QueryEdge>();
   const visited = new Set(seeds.map((symbol) => symbol.id));
   let frontier = seeds.map((symbol) => symbol.id);
 
@@ -213,7 +222,7 @@ async function executeRelationQuery(
 
       for (const row of rows) {
         const node = toSymbolNode(row);
-        const edge = toCallEdge(row);
+        const edge = toRelationEdge(row, relationTerm.key);
 
         nodesById.set(node.id, node);
         edgesByKey.set(edgeKey(edge), edge);
@@ -253,29 +262,64 @@ RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
 
 async function queryRelationRows(
   connection: Connection,
-  relation: "callers" | "callees",
+  relation: RelationKey,
   originId: string,
   filters: QueryFilters,
 ): Promise<SymbolRow[]> {
   const { whereClause, parameters } = createRelationWhereClause(filters);
-  const match =
-    relation === "callers"
-      ? "MATCH (symbol:Symbol)-[call:Calls]->(origin:Symbol)"
-      : "MATCH (origin:Symbol)-[call:Calls]->(symbol:Symbol)";
-  const source = relation === "callers" ? "symbol.id" : "origin.id";
-  const target = relation === "callers" ? "origin.id" : "symbol.id";
+  const relationMatch = createRelationMatch(relation);
 
   return queryRows(
     connection,
-    `${match}
+    `${relationMatch.match}
 WHERE origin.id = $originId${whereClause}
 RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
   symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
   symbol.startLine AS startLine, symbol.signature AS signature,
-  ${source} AS edgeSource, ${target} AS edgeTarget, call.line AS line,
-  call.\`column\` AS callColumn, call.isResolved AS isResolved;`,
+  ${relationMatch.source} AS edgeSource, ${relationMatch.target} AS edgeTarget${relationMatch.edgeFields};`,
     { ...parameters, originId },
   );
+}
+
+function createRelationMatch(relation: RelationKey): {
+  readonly match: string;
+  readonly source: string;
+  readonly target: string;
+  readonly edgeFields: string;
+} {
+  if (relation === "callers") {
+    return {
+      match: "MATCH (symbol:Symbol)-[call:Calls]->(origin:Symbol)",
+      source: "symbol.id",
+      target: "origin.id",
+      edgeFields: ", call.line AS line, call.`column` AS callColumn, call.isResolved AS isResolved",
+    };
+  }
+
+  if (relation === "callees") {
+    return {
+      match: "MATCH (origin:Symbol)-[call:Calls]->(symbol:Symbol)",
+      source: "origin.id",
+      target: "symbol.id",
+      edgeFields: ", call.line AS line, call.`column` AS callColumn, call.isResolved AS isResolved",
+    };
+  }
+
+  if (relation === "extends") {
+    return {
+      match: "MATCH (origin:Symbol)-[extend:Extends]->(symbol:Symbol)",
+      source: "origin.id",
+      target: "symbol.id",
+      edgeFields: "",
+    };
+  }
+
+  return {
+    match: "MATCH (symbol:Symbol)-[extend:Extends]->(origin:Symbol)",
+    source: "symbol.id",
+    target: "origin.id",
+    edgeFields: "",
+  };
 }
 
 function createSymbolWhereClause(
@@ -373,7 +417,15 @@ function toSymbolNode(row: Record<string, unknown>): QuerySymbolNode {
   };
 }
 
-function toCallEdge(row: Record<string, unknown>): QueryCallEdge {
+function toRelationEdge(row: Record<string, unknown>, relation: RelationKey): QueryEdge {
+  if (relation === "extends" || relation === "subclasses") {
+    return {
+      kind: "Extends",
+      source: readString(row.edgeSource, "edgeSource"),
+      target: readString(row.edgeTarget, "edgeTarget"),
+    };
+  }
+
   return {
     kind: "Calls",
     source: readString(row.edgeSource, "edgeSource"),
@@ -385,25 +437,36 @@ function toCallEdge(row: Record<string, unknown>): QueryCallEdge {
 }
 
 function isRelationTerm(term: QueryTerm): term is RelationQueryTerm {
-  return term.key === "callers" || term.key === "callees";
+  return term.key === "callers" || term.key === "callees" || term.key === "extends" || term.key === "subclasses";
 }
 
-function edgeKey(edge: QueryCallEdge): string {
-  return `${edge.source}->${edge.target}@${edge.line}:${edge.column}`;
+function edgeKey(edge: QueryEdge): string {
+  if (edge.kind === "Extends") {
+    return `${edge.kind}:${edge.source}->${edge.target}`;
+  }
+
+  return `${edge.kind}:${edge.source}->${edge.target}@${edge.line}:${edge.column}`;
 }
 
 function sortNodes(nodes: readonly QueryNode[]): QueryNode[] {
   return [...nodes].sort((left, right) => nodeSortKey(left).localeCompare(nodeSortKey(right)));
 }
 
-function sortEdges(edges: readonly QueryCallEdge[]): QueryCallEdge[] {
+function sortEdges(edges: readonly QueryEdge[]): QueryEdge[] {
   return [...edges].sort(
     (left, right) =>
       left.source.localeCompare(right.source) ||
       left.target.localeCompare(right.target) ||
-      left.line - right.line ||
-      left.column - right.column,
+      compareEdgeLocation(left, right),
   );
+}
+
+function compareEdgeLocation(left: QueryEdge, right: QueryEdge): number {
+  if (left.kind === "Extends" || right.kind === "Extends") {
+    return left.kind.localeCompare(right.kind);
+  }
+
+  return left.line - right.line || left.column - right.column;
 }
 
 function nodeSortKey(node: QueryNode): string {

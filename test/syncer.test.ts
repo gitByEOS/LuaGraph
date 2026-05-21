@@ -117,6 +117,49 @@ describe("syncProject", () => {
     });
   });
 
+  it("同步后重建 Extends 并移除旧继承边", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "src/inherit.lua",
+      [
+        "Base = {}",
+        "OtherBase = {}",
+        "Child = setmetatable({}, { __index = Base })",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    await expect(queryProject(projectRoot, "extends:Child")).resolves.toMatchObject({
+      count: 1,
+      nodes: [{ qualifiedName: "Base" }],
+    });
+
+    await writeLuaFile(
+      projectRoot,
+      "src/inherit.lua",
+      [
+        "Base = {}",
+        "OtherBase = {}",
+        "Child = setmetatable({}, { __index = OtherBase })",
+      ].join("\n"),
+    );
+
+    await syncProject(projectRoot);
+
+    await expect(queryProject(projectRoot, "extends:Child")).resolves.toMatchObject({
+      count: 1,
+      nodes: [{ qualifiedName: "OtherBase" }],
+    });
+    await expect(queryProject(projectRoot, "subclasses:Base")).resolves.toMatchObject({
+      count: 0,
+      nodes: [],
+      edges: [],
+    });
+  });
+
   it("传入 onProgress 时报告同步进度", async () => {
     const projectRoot = await createTempProject();
     const messages: string[] = [];
@@ -136,7 +179,8 @@ describe("syncProject", () => {
         "待刷新 1 个文件，待删除 0 个文件",
         "同步文件[1/1] player.lua",
         "开始重建 Calls",
-        "完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0",
+        "开始重建 Extends",
+        "完成统计：扫描 1，刷新 1，删除 0，符号 1，Contains 1，Calls 0，Extends 0",
       ]),
     );
   });
