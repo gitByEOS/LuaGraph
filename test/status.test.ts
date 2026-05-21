@@ -5,10 +5,10 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
-import { getProjectStatus } from "../src/status.js";
-import { getKuzuDatabasePath } from "../src/store.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
+import { getProjectStatus } from "../src/core/status.js";
+import { getKuzuDatabasePath } from "../src/core/store.js";
 
 const tempRoots: string[] = [];
 

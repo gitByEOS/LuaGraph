@@ -6,7 +6,7 @@ import type {
   QueryNode,
   QueryRequireEdge,
   QuerySymbolNode,
-} from "./types.js";
+} from "../core/project-types.js";
 
 export type GraphOutputFormat = "json" | "table" | "tree";
 

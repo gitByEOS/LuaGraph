@@ -1,6 +1,4 @@
-export type NormalizedPath = string & {
-  readonly __normalizedPath: unique symbol;
-};
+import type { NormalizedPath } from "../ast/types.js";
 
 export type LuaGraphConfig = {
   readonly include: readonly string[];
@@ -17,60 +15,6 @@ export type ScannedLuaFile = {
   readonly path: NormalizedPath;
   readonly size: number;
   readonly modifiedAt: Date;
-};
-
-export type SymbolKind = "class" | "table" | "module" | "method" | "function";
-
-export type LuaFile = {
-  readonly type: "File";
-  readonly path: NormalizedPath;
-  readonly symbols: readonly LuaSymbol[];
-  readonly calls: readonly LuaCall[];
-  readonly extends: readonly LuaExtend[];
-  readonly requires: readonly LuaRequire[];
-};
-
-export type LuaSymbol = {
-  readonly type: "Symbol";
-  readonly id: string;
-  readonly kind: SymbolKind;
-  readonly name: string;
-  readonly qualifiedName: string;
-  readonly filePath: NormalizedPath;
-  readonly startLine: number;
-  readonly startColumn: number;
-  readonly endLine: number;
-  readonly endColumn: number;
-  readonly signature: string;
-  readonly isLocal: boolean;
-  readonly isExported: boolean;
-  readonly isUnresolved: boolean;
-};
-
-export type LuaCall = {
-  readonly type: "Call";
-  readonly filePath: NormalizedPath;
-  readonly calleeQualifiedName: string;
-  readonly line: number;
-  readonly column: number;
-};
-
-export type LuaExtend = {
-  readonly type: "Extends";
-  readonly filePath: NormalizedPath;
-  readonly childQualifiedName: string;
-  readonly parentQualifiedName: string;
-  readonly line: number;
-  readonly column: number;
-};
-
-export type LuaRequire = {
-  readonly type: "Require";
-  readonly filePath: NormalizedPath;
-  readonly moduleName: string;
-  readonly isStatic: boolean;
-  readonly line: number;
-  readonly column: number;
 };
 
 export type InitPlan = {

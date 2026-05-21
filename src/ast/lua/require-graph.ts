@@ -2,11 +2,11 @@ import nodePath from "node:path";
 
 import { Connection, type QueryResult } from "kuzu";
 
-import type { LuaRequire, NormalizedPath } from "./types.js";
+import type { ParsedRequire, NormalizedPath } from "../types.js";
 
 export type ParsedRequireGraphFile = {
   readonly path: NormalizedPath;
-  readonly requires: readonly LuaRequire[];
+  readonly requires: readonly ParsedRequire[];
 };
 
 export async function rebuildRequiresRelationships(

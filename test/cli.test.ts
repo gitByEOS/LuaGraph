@@ -6,8 +6,8 @@ import type { Command } from "commander";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCli } from "../src/cli.js";
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
 
 const tempRoots: string[] = [];
 

@@ -4,11 +4,11 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
-import { queryProject } from "../src/query.js";
-import { getProjectStatus } from "../src/status.js";
-import { syncProject } from "../src/syncer.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
+import { queryProject } from "../src/core/query.js";
+import { getProjectStatus } from "../src/core/status.js";
+import { syncProject } from "../src/core/syncer.js";
 
 const tempRoots: string[] = [];
 

@@ -5,7 +5,7 @@ import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { LuaGraphQueryResult, QueryEdge, QueryNode, QueryRequireEdge, QuerySymbolNode } from "./types.js";
+import type { LuaGraphQueryResult, QueryEdge, QueryNode, QueryRequireEdge, QuerySymbolNode } from "./project-types.js";
 
 export type QueryProjectOptions = {
   readonly depth?: number;

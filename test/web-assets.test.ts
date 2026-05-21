@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const webRoot = join(process.cwd(), "src/web");
+const webRoot = join(process.cwd(), "src/web/assets");
 
 describe("serve 静态 Web 资产", () => {
   it("声明页面布局和 ECharts 静态脚本", async () => {

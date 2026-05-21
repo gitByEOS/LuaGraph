@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Connection, Database } from "kuzu";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getKuzuDatabasePath, initializeStore, schemaStatements } from "../src/store.js";
+import { getKuzuDatabasePath, initializeStore, schemaStatements } from "../src/core/store.js";
 
 const tempRoots: string[] = [];
 

@@ -28,6 +28,12 @@ node dist/cli.js impact init        # 代替 luagraph impact
 node dist/cli.js serve <path>       # 启动本地可视化服务
 ```
 
+## 模块结构
+
+源码按边界分为四层：`src/cli/` 负责命令装配，`src/web/` 负责本地可视化服务和静态资产，`src/core/` 负责产品层流程、配置、查询和存储，`src/ast/` 负责语言无关中间表示与语言适配器。当前 Lua 实现位于 `src/ast/lua/`，JavaScript 与 TypeScript 目录仅保留适配器占位说明。
+
+根入口 `src/cli.ts` 只转发到 `src/cli/cli.ts`，因此构建后的 `dist/cli.js` 路径保持不变；公共库出口仍使用 `src/lib.ts`。
+
 ## 使用方式
 
 ### 1. 初始化项目
@@ -295,6 +301,7 @@ submit/test-query.sh           # query 查询验收
 submit/test-impact.sh          # impact 与格式验收
 submit/test-extends.sh         # Extends 最小闭环验收
 submit/test-requires.sh        # Requires 最小闭环验收
+submit/test-layout.sh          # 目录分层验收
 ```
 
 ### 快速验证（最快）

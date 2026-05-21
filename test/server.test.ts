@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
-import { startServer, type ServerHandle } from "../src/server.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
+import { startServer, type ServerHandle } from "../src/web/server.js";
 
 const tempRoots: string[] = [];
 const servers: ServerHandle[] = [];
@@ -183,7 +183,7 @@ describe("serve API", () => {
     });
 
     try {
-      const { startServer: startServerWithMissingVendor } = await import("../src/server.js");
+      const { startServer: startServerWithMissingVendor } = await import("../src/web/server.js");
       const server = await startServerWithMissingVendor(projectRoot);
       servers.push(server);
 

@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { Connection, Database, type QueryResult } from "kuzu";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
-import { getKuzuDatabasePath } from "../src/store.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
+import { getKuzuDatabasePath } from "../src/core/store.js";
 
 const tempRoots: string[] = [];
 

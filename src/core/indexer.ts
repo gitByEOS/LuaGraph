@@ -4,14 +4,12 @@ import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { rebuildCallsRelationships } from "./call-graph.js";
+import { getLanguageAdapter } from "../ast/registry.js";
 import { readConfig } from "./config.js";
-import { rebuildExtendsRelationships } from "./extend-graph.js";
-import { parseLuaFile } from "./parser.js";
-import { rebuildRequiresRelationships } from "./require-graph.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
-import type { IndexResult, LuaFile, LuaSymbol, NormalizedPath, ScannedLuaFile } from "./types.js";
+import type { NormalizedPath, ParsedFile, ParsedSymbol } from "../ast/types.js";
+import type { IndexResult, ScannedLuaFile } from "./project-types.js";
 
 export type IndexProjectOptions = {
   readonly force?: boolean;
@@ -23,7 +21,7 @@ export type IndexProgressReporter = (message: string) => void;
 type ParsedProjectFile = {
   readonly file: ScannedLuaFile;
   readonly content: string;
-  readonly parsed: LuaFile;
+  readonly parsed: ParsedFile;
 };
 
 export async function indexProject(
@@ -74,18 +72,11 @@ export async function indexProject(
       reportFileProgress(options, file.path, index + 1, files.length);
     }
 
-    callsCount = await rebuildCallsRelationships(
-      connection,
-      parsedFiles.map((file) => file.parsed),
-    );
-    extendsCount = await rebuildExtendsRelationships(
-      connection,
-      parsedFiles.map((file) => file.parsed),
-    );
-    requiresCount = await rebuildRequiresRelationships(
-      connection,
-      parsedFiles.map((file) => file.parsed),
-    );
+    const adapter = getLanguageAdapter();
+    const parsedProjectFiles = parsedFiles.map((file) => file.parsed);
+    callsCount = await adapter.rebuildCallsRelationships(connection, parsedProjectFiles);
+    extendsCount = await adapter.rebuildExtendsRelationships(connection, parsedProjectFiles);
+    requiresCount = await adapter.rebuildRequiresRelationships(connection, parsedProjectFiles);
   } finally {
     await connection.close();
     await database.close();
@@ -118,7 +109,7 @@ async function readParsedProjectFiles(
       return {
         file,
         content,
-        parsed: parseLuaFile(file.path, content),
+        parsed: getLanguageAdapter().parseFile(file.path, content),
       };
     }),
   );
@@ -163,7 +154,7 @@ async function insertFile(
   );
 }
 
-async function insertSymbol(connection: Connection, symbol: LuaSymbol): Promise<void> {
+async function insertSymbol(connection: Connection, symbol: ParsedSymbol): Promise<void> {
   const now = new Date();
 
   const stmt = await connection.prepare(
@@ -193,7 +184,7 @@ async function insertSymbol(connection: Connection, symbol: LuaSymbol): Promise<
 async function insertContainsRelationships(
   connection: Connection,
   filePath: NormalizedPath,
-  symbols: readonly LuaSymbol[],
+  symbols: readonly ParsedSymbol[],
 ): Promise<void> {
   const stmt = await connection.prepare(
     "MATCH (f:File {path: $fromPath}), (s:Symbol {id: $toId}) CREATE (f)-[r:Contains]->(s)",

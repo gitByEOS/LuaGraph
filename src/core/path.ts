@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import nodePath from "node:path";
 
-import type { NormalizedPath } from "./types.js";
+import type { NormalizedPath } from "../ast/types.js";
 
 export function normalizeRepositoryPath(pathValue: string): NormalizedPath {
   if (pathValue.length === 0) {

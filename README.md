@@ -8,42 +8,34 @@ LuaGraph v0.8.0 是一个 TypeScript CLI/library，用于扫描 Lua 项目、提
 
 | 模块        | 文件                                       | 状态 |
 | ----------- | ------------------------------------------ | ---- |
-| 项目骨架    | `src/cli.ts`, `src/lib.ts`, `src/types.ts` | 已完成 |
-| 路径规范    | `src/path.ts`                              | 已完成 |
-| 配置读写    | `src/config.ts`                            | 已完成 |
-| Kuzu Schema | `src/store.ts`                             | 已完成 |
-| 文件扫描    | `src/scanner.ts`                           | 已完成 |
-| 流程编排    | `src/init.ts`                              | 已完成 |
-| 状态统计    | `src/status.ts`                            | 已完成 |
-| 索引写入    | `src/indexer.ts`, `src/call-graph.ts`, `src/extend-graph.ts`, `src/require-graph.ts` | 已完成 (File/Symbol/Contains/Calls/Extends/Requires) |
-| 抽查入口    | `src/sample.ts`                            | 已完成 |
-| 本地服务    | `src/server.ts`, `src/web/*`               | 已完成 (第一版可视化) |
-| v0.4 解析准确性 | `src/parser.ts`, `test/parser.test.ts` | 已完成 (行级模式，含函数作用域结束行和调用提取) |
-| v0.5 增量同步 | `src/syncer.ts`                          | 已完成 |
-| v0.6 图查询 | `src/query.ts`                             | 已完成 |
-| v0.7 影响分析 | `src/impact.ts`                          | 已完成 |
-| v0.7 输出格式 | `src/format.ts`                          | 已完成 (query/impact 的 json/table/tree) |
-| v0.8 最小继承 | `src/parser.ts`, `src/extend-graph.ts`, `src/query.ts` | 已完成 (`setmetatable({}, { __index = Parent })`) |
-| v0.8 Requires | `src/parser.ts`, `src/require-graph.ts`, `src/query.ts`, `src/impact.ts` | 已完成最小闭环 (静态/动态 require、查询、反向影响) |
+| CLI 入口    | `src/cli.ts`, `src/cli/*`                  | 已完成 |
+| 公共出口    | `src/lib.ts`                               | 已完成 |
+| Core 产品层 | `src/core/*`                               | 已完成 |
+| AST 中间层  | `src/ast/types.ts`, `src/ast/registry.ts`  | 已完成 |
+| Lua 适配器  | `src/ast/lua/*`                            | 已完成 |
+| JS/TS 预留  | `src/ast/javascript/README.md`, `src/ast/typescript/README.md` | 已占位 |
+| Web 服务    | `src/web/server.ts`, `src/web/assets/*`    | 已完成 |
+| v0.4 解析准确性 | `src/ast/lua/parser.ts`, `test/parser.test.ts` | 已完成 (行级模式，含函数作用域结束行和调用提取) |
+| v0.5 增量同步 | `src/core/syncer.ts`                    | 已完成 |
+| v0.6 图查询 | `src/core/query.ts`                        | 已完成 |
+| v0.7 影响分析 | `src/core/impact.ts`                    | 已完成 |
+| v0.7 输出格式 | `src/cli/format.ts`                     | 已完成 (query/impact 的 json/table/tree) |
+| v0.8 最小继承 | `src/ast/lua/parser.ts`, `src/ast/lua/extend-graph.ts`, `src/core/query.ts` | 已完成 (`setmetatable` 与 `class("X", Base)`) |
+| v0.8 Requires | `src/ast/lua/parser.ts`, `src/ast/lua/require-graph.ts`, `src/core/query.ts`, `src/core/impact.ts` | 已完成最小闭环 (静态/动态 require、查询、反向影响) |
 
 ### 模块结构
 
-- `src/cli.ts`：CLI 入口，支持 `luagraph init`、`luagraph status`、`luagraph index`、`luagraph sync`、`luagraph sample`、`luagraph query`、`luagraph impact` 和 `luagraph serve` 命令。
-- `src/lib.ts`：公共库出口。
-- `src/types.ts`：配置、schema、路径、init、扫描器和状态类型。
-- `src/config.ts`：配置读写校验，默认读取 `.gitignore` 生成 exclude。
-- `src/path.ts`：Git 风格路径规范化和安全解析。
-- `src/store.ts`：Kuzu schema 入口，定义 File/Symbol 节点和 Contains/Calls/Requires/Extends 关系表。
-- `src/scanner.ts`：按配置扫描 Lua 文件并返回仓库相对路径。
-- `src/parser.ts`：行级 Lua 符号、调用、最小继承候选和 require 提取，输出 File、Symbol、Call、Extends 与 Require 结构。
-- `src/status.ts`：读取项目配置和 Kuzu 库，统计 File、Symbol、关系、解析错误、符号分类与待同步变化数量。
-- `src/sample.ts`：index 后从 Kuzu 抽查少量 Symbol 字段，作为和 status 同级的验证入口。
-- `src/syncer.ts`：基于 contentHash 增量刷新已变更和已删除 Lua 文件。
-- `src/query.ts`：按 `name`、`kind`、`callers`、`callees`、`extends`、`subclasses`、`requires`、`dependents` 查询已索引图。
-- `src/impact.ts`：基于 Calls 和文件级 Requires 反向关系分析影响范围。
-- `src/format.ts`：为 query/impact 提供 `json`、`table`、`tree` 输出。
-- `src/server.ts`：内置 HTTP 服务，提供 `/api/status`、`/api/graph`、`/api/code` 和静态 Web UI。
-- `src/init.ts`：初始化流程编排入口。
+- `src/cli.ts`：薄 CLI 入口，保持 `dist/cli.js` 产物路径不变。
+- `src/cli/`：命令装配、浏览器打开和 query/impact 输出格式。
+- `src/lib.ts`：公共库出口，聚合 core 与 AST 必要类型。
+- `src/ast/types.ts`：语言无关中间表示，包含 `ParsedFile`、`ParsedSymbol`、`ParsedCall`、`ParsedExtend`、`ParsedRequire`。
+- `src/ast/registry.ts`：语言适配器统一入口；当前固定返回 Lua 适配器。
+- `src/ast/lua/`：Lua 行级解析、Calls/Extends/Requires 关系重建与相关边删除。
+- `src/ast/javascript/`、`src/ast/typescript/`：后续语言适配器占位说明，不含假实现。
+- `src/core/`：配置、路径、扫描、初始化、索引、同步、查询、影响分析、状态、存储和代码片段读取。
+- `src/core/project-types.ts`：配置、命令结果、查询节点、状态等产品层类型。
+- `src/web/server.ts`：内置 HTTP 服务，提供 `/api/status`、`/api/graph`、`/api/code`。
+- `src/web/assets/`：静态 Web UI 资产。
 - `test/`：测试。
 
 ### Serve 第一版
@@ -80,6 +72,7 @@ luagraph serve [project_root] --port <port> --open
 | Impact | `submit/test-impact.sh` | `npm run typecheck && npx vitest run test/format.test.ts test/impact.test.ts test/query.test.ts test/cli.test.ts && npm run build`，CLI 临时项目验证 query/impact 的 json/table/tree 输出 |
 | Extends | `submit/test-extends.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/format.test.ts && npm run build`，CLI 临时项目验证 Extends 查询 |
 | Requires | `submit/test-requires.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/impact.test.ts test/cli.test.ts && npm run build`，CLI 临时项目验证 requires/dependents/impact |
+| Layout | `submit/test-layout.sh` | `npm run typecheck && npx vitest run test/parser.test.ts test/indexer.test.ts test/syncer.test.ts test/query.test.ts test/server.test.ts test/web-assets.test.ts && npm run build`，验证目录分层后的公共入口、Lua 适配器和 Web 资产路径 |
 
 ## Systems/ 分析（已完成 ✅）
 

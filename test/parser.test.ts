@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseLuaFile } from "../src/parser.js";
+import { parseLuaFile } from "../src/ast/lua/parser.js";
 
 describe("Lua parser Phase 1 最小提取", () => {
   it("从内联 fixture 提取 class、method 和 function 符号", () => {

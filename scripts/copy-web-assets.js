@@ -1,20 +1,21 @@
 import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 
 await mkdir("dist", { recursive: true });
-await rm("dist/web", { recursive: true, force: true });
+await mkdir("dist/web", { recursive: true });
+await rm("dist/web/assets", { recursive: true, force: true });
 
 if (!(await hasWebAssets())) {
   process.exit(0);
 }
 
-await cp("src/web", "dist/web", { recursive: true });
+await cp("src/web/assets", "dist/web/assets", { recursive: true });
 
 async function hasWebAssets() {
-  if (!(await pathExists("src/web"))) {
+  if (!(await pathExists("src/web/assets"))) {
     return false;
   }
 
-  return (await readdir("src/web")).length > 0;
+  return (await readdir("src/web/assets")).length > 0;
 }
 
 async function pathExists(path) {

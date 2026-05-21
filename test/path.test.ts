@@ -4,7 +4,7 @@ import nodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { normalizeRepositoryPath, resolveSafeRepositoryPath } from "../src/path.js";
+import { normalizeRepositoryPath, resolveSafeRepositoryPath } from "../src/core/path.js";
 
 const tempRoots: string[] = [];
 

@@ -7,7 +7,8 @@ import { Connection, Database, type QueryResult } from "kuzu";
 import { configPath, readConfig } from "./config.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
-import type { NormalizedPath, ScannedLuaFile, StatusResult } from "./types.js";
+import type { NormalizedPath } from "../ast/types.js";
+import type { ScannedLuaFile, StatusResult } from "./project-types.js";
 
 export async function getProjectStatus(projectRoot: string): Promise<StatusResult> {
   const resolvedProjectRoot = resolve(projectRoot);

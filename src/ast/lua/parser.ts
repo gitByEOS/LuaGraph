@@ -1,5 +1,6 @@
-import { normalizeRepositoryPath } from "./path.js";
-import type { LuaCall, LuaExtend, LuaFile, LuaRequire, LuaSymbol, NormalizedPath, SymbolKind } from "./types.js";
+import nodePath from "node:path";
+
+import type { ParsedCall, ParsedExtend, ParsedFile, ParsedRequire, ParsedSymbol, NormalizedPath, SymbolKind } from "../types.js";
 
 type SymbolDraft = {
   readonly kind: SymbolKind;
@@ -30,7 +31,7 @@ const requirePattern =
   /(?<![A-Za-z0-9_])require\s*(?:\(\s*(?<parenthesizedExpression>[^)]*?)\s*\)|(?<bareExpression>["'][^"']+["']))/g;
 
 // Phase 1 最小提取：行级模式只识别声明入口，不伪装完整 Lua AST。
-export function parseLuaFile(pathValue: string, source: string): LuaFile {
+export function parseLuaFile(pathValue: string, source: string): ParsedFile {
   const filePath = normalizeRepositoryPath(pathValue);
   const symbols = extractLuaSymbols(filePath, source);
   const calls = extractLuaCalls(filePath, source);
@@ -47,26 +48,26 @@ export function parseLuaFile(pathValue: string, source: string): LuaFile {
   };
 }
 
-export function extractLuaSymbols(filePath: NormalizedPath, source: string): readonly LuaSymbol[] {
+export function extractLuaSymbols(filePath: NormalizedPath, source: string): readonly ParsedSymbol[] {
   const lines = source.split(/\r\n|\n|\r/);
   const drafts = extractSymbolDrafts(lines);
 
   return drafts.map((draft) => createSymbol(filePath, draft));
 }
 
-export function extractLuaCalls(filePath: NormalizedPath, source: string): readonly LuaCall[] {
+export function extractLuaCalls(filePath: NormalizedPath, source: string): readonly ParsedCall[] {
   return source
     .split(/\r\n|\n|\r/)
     .flatMap((line, index) => parseCallLine(filePath, stripLuaLine(line), index + 1));
 }
 
-export function extractLuaExtends(filePath: NormalizedPath, source: string): readonly LuaExtend[] {
+export function extractLuaExtends(filePath: NormalizedPath, source: string): readonly ParsedExtend[] {
   return source
     .split(/\r\n|\n|\r/)
     .flatMap((line, index) => parseExtendsLine(filePath, stripLuaComment(line), index + 1));
 }
 
-export function extractLuaRequires(filePath: NormalizedPath, source: string): readonly LuaRequire[] {
+export function extractLuaRequires(filePath: NormalizedPath, source: string): readonly ParsedRequire[] {
   return source
     .split(/\r\n|\n|\r/)
     .flatMap((line, index) => parseRequireLine(filePath, stripLuaComment(line), index + 1));
@@ -125,8 +126,8 @@ function parseCallLine(
   filePath: NormalizedPath,
   strippedLine: string,
   lineNumber: number,
-): readonly LuaCall[] {
-  const calls: LuaCall[] = [];
+): readonly ParsedCall[] {
+  const calls: ParsedCall[] = [];
 
   for (const match of strippedLine.matchAll(callPattern)) {
     const callee = match.groups?.callee;
@@ -151,7 +152,7 @@ function parseExtendsLine(
   filePath: NormalizedPath,
   strippedLine: string,
   lineNumber: number,
-): readonly LuaExtend[] {
+): readonly ParsedExtend[] {
   const match = setmetatableExtendsPattern.exec(strippedLine) ?? classPattern.exec(strippedLine);
 
   if (match?.groups === undefined) {
@@ -181,8 +182,8 @@ function parseRequireLine(
   filePath: NormalizedPath,
   line: string,
   lineNumber: number,
-): readonly LuaRequire[] {
-  const requires: LuaRequire[] = [];
+): readonly ParsedRequire[] {
+  const requires: ParsedRequire[] = [];
 
   for (const match of line.matchAll(requirePattern)) {
     const expression = match.groups?.parenthesizedExpression ?? match.groups?.bareExpression;
@@ -320,7 +321,7 @@ function parseFunctionLine(line: string, lineNumber: number): SymbolDraft | unde
   };
 }
 
-function createSymbol(filePath: NormalizedPath, draft: SymbolDraft): LuaSymbol {
+function createSymbol(filePath: NormalizedPath, draft: SymbolDraft): ParsedSymbol {
   return {
     type: "Symbol",
     id: `${filePath}#${draft.kind}#${draft.qualifiedName}#${draft.startLine}:${draft.startColumn}`,
@@ -526,4 +527,18 @@ function isInsideLuaString(line: string, targetIndex: number): boolean {
   }
 
   return quote !== undefined;
+}
+
+function normalizeRepositoryPath(value: string): NormalizedPath {
+  const normalized = value.replaceAll("\\", "/").replaceAll(/\/+/g, "/").replace(/^\.\//, "");
+
+  if (nodePath.posix.isAbsolute(normalized)) {
+    throw new Error("路径必须是仓库相对路径");
+  }
+
+  if (normalized.split("/").includes("..")) {
+    throw new Error("路径不能包含 ..");
+  }
+
+  return normalized as NormalizedPath;
 }

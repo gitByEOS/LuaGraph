@@ -6,7 +6,7 @@ import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 import { configPath, readConfig } from "./config.js";
 import { normalizeRepositoryPath } from "./path.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { LuaGraphImpactResult, QueryCallEdge, QueryEdge, QueryRequireEdge, QuerySymbolNode } from "./types.js";
+import type { LuaGraphImpactResult, QueryCallEdge, QueryEdge, QueryRequireEdge, QuerySymbolNode } from "./project-types.js";
 
 export type ImpactProjectOptions = {
   readonly depth?: number;

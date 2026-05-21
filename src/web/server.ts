@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { readCodeSnippet } from "./code.js";
-import { readConfig } from "./config.js";
-import { getProjectStatus } from "./status.js";
-import { getKuzuDatabasePath } from "./store.js";
+import { readCodeSnippet } from "../core/code.js";
+import { readConfig } from "../core/config.js";
+import { getProjectStatus } from "../core/status.js";
+import { getKuzuDatabasePath } from "../core/store.js";
 
 export type ServerOptions = {
   readonly port?: number;
@@ -319,7 +319,7 @@ async function writeStaticAsset(response: ServerResponse, path: string): Promise
 function resolveStaticAsset(path: string): StaticAsset | undefined {
   if (path === "/vendor/echarts.min.js") {
     return {
-      path: join(moduleDir, "../node_modules/echarts/dist/echarts.min.js"),
+      path: join(moduleDir, "../../node_modules/echarts/dist/echarts.min.js"),
       contentType: "text/javascript; charset=utf-8",
     };
   }
@@ -330,7 +330,7 @@ function resolveStaticAsset(path: string): StaticAsset | undefined {
   }
 
   return {
-    path: join(moduleDir, "web", relativePath),
+    path: join(moduleDir, "assets", relativePath),
     contentType: readContentType(relativePath),
   };
 }

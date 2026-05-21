@@ -4,14 +4,12 @@ import nodePath from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import { deleteCallsForFiles, rebuildCallsRelationships } from "./call-graph.js";
+import { getLanguageAdapter } from "../ast/registry.js";
 import { configPath, readConfig } from "./config.js";
-import { deleteExtendsForFiles, rebuildExtendsRelationships } from "./extend-graph.js";
-import { parseLuaFile } from "./parser.js";
-import { deleteRequiresForFiles, rebuildRequiresRelationships } from "./require-graph.js";
 import { scanLuaFiles } from "./scanner.js";
 import { getKuzuDatabasePath, schemaStatements } from "./store.js";
-import type { LuaSymbol, NormalizedPath, ScannedLuaFile, SyncResult } from "./types.js";
+import type { NormalizedPath, ParsedSymbol } from "../ast/types.js";
+import type { ScannedLuaFile, SyncResult } from "./project-types.js";
 
 export type SyncProjectOptions = {
   readonly onProgress?: SyncProgressReporter;
@@ -69,22 +67,23 @@ export async function syncProject(
       ...changedFiles.map((file) => file.file.path),
     ];
 
-    await deleteCallsForFiles(connection, affectedFilePaths);
-    await deleteExtendsForFiles(connection, affectedFilePaths);
-    await deleteRequiresForFiles(connection, affectedFilePaths);
+    const adapter = getLanguageAdapter();
+    await adapter.deleteCallsForFiles(connection, affectedFilePaths);
+    await adapter.deleteExtendsForFiles(connection, affectedFilePaths);
+    await adapter.deleteRequiresForFiles(connection, affectedFilePaths);
     await removeIndexedFiles(connection, affectedFilePaths);
     await writeChangedFiles(connection, changedFiles, options);
     let callsCount = 0;
     let extendsCount = 0;
     let requiresCount = 0;
     if (affectedFilePaths.length > 0) {
-      const parsedFiles = currentFiles.map((file) => parseLuaFile(file.file.path, file.content));
+      const parsedFiles = currentFiles.map((file) => adapter.parseFile(file.file.path, file.content));
       reportProgress(options, "开始重建 Calls");
-      callsCount = await rebuildCallsRelationships(connection, parsedFiles);
+      callsCount = await adapter.rebuildCallsRelationships(connection, parsedFiles);
       reportProgress(options, "开始重建 Extends");
-      extendsCount = await rebuildExtendsRelationships(connection, parsedFiles);
+      extendsCount = await adapter.rebuildExtendsRelationships(connection, parsedFiles);
       reportProgress(options, "开始重建 Requires");
-      requiresCount = await rebuildRequiresRelationships(connection, parsedFiles);
+      requiresCount = await adapter.rebuildRequiresRelationships(connection, parsedFiles);
     } else {
       reportProgress(options, "跳过重建 Calls：无变更文件");
       reportProgress(options, "跳过重建 Extends：无变更文件");
@@ -180,7 +179,7 @@ async function writeChangedFiles(
   options: SyncProjectOptions,
 ): Promise<void> {
   for (const [index, file] of files.entries()) {
-    const parsed = parseLuaFile(file.file.path, file.content);
+    const parsed = getLanguageAdapter().parseFile(file.file.path, file.content);
 
     await insertFile(connection, file, parsed.symbols.length);
 
@@ -224,7 +223,7 @@ async function insertFile(
   );
 }
 
-async function insertSymbol(connection: Connection, symbol: LuaSymbol): Promise<void> {
+async function insertSymbol(connection: Connection, symbol: ParsedSymbol): Promise<void> {
   const now = new Date();
   const statement = await connection.prepare(
     "MERGE (n:Symbol {id: $id}) SET n.kind = $kind, n.name = $name, n.qualifiedName = $qualifiedName, n.filePath = $filePath, n.startLine = $startLine, n.endLine = $endLine, n.startColumn = $startColumn, n.endColumn = $endColumn, n.docstring = $docstring, n.signature = $signature, n.isLocal = $isLocal, n.isExported = $isExported, n.isUnresolved = $isUnresolved, n.updatedAt = $updatedAt",
@@ -254,7 +253,7 @@ async function insertSymbol(connection: Connection, symbol: LuaSymbol): Promise<
 async function insertContainsRelationships(
   connection: Connection,
   filePath: NormalizedPath,
-  symbols: readonly LuaSymbol[],
+  symbols: readonly ParsedSymbol[],
 ): Promise<void> {
   const statement = await connection.prepare(
     "MATCH (f:File {path: $fromPath}), (s:Symbol {id: $toId}) CREATE (f)-[r:Contains]->(s)",

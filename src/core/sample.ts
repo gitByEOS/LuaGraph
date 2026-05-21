@@ -5,7 +5,7 @@ import { Connection, Database, type QueryResult } from "kuzu";
 
 import { configPath, readConfig } from "./config.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { SampleResult, SampleSymbol } from "./types.js";
+import type { SampleResult, SampleSymbol } from "./project-types.js";
 
 export type SampleProjectOptions = {
   readonly limit?: number;

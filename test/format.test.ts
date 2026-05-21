@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { formatImpactResult, formatQueryResult } from "../src/format.js";
-import type { LuaGraphImpactResult, LuaGraphQueryResult } from "../src/types.js";
+import { formatImpactResult, formatQueryResult } from "../src/cli/format.js";
+import type { LuaGraphImpactResult, LuaGraphQueryResult } from "../src/core/project-types.js";
 
 describe("graph output formatters", () => {
   it("query json 输出保持可解析", () => {

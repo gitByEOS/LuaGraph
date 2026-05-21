@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 
 import { configPath, createDefaultConfig, readConfig, writeConfig } from "./config.js";
 import { initializeStore, schemaStatements } from "./store.js";
-import type { InitPlan, InitResult } from "./types.js";
+import type { InitPlan, InitResult } from "./project-types.js";
 
 export function createInitPlan(projectRoot: string): InitPlan {
   return {

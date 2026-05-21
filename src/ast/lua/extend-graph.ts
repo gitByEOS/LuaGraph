@@ -1,10 +1,10 @@
 import { Connection, type QueryResult } from "kuzu";
 
-import type { LuaExtend, LuaSymbol } from "./types.js";
+import type { ParsedExtend, ParsedSymbol } from "../types.js";
 
 export type ParsedExtendsGraphFile = {
-  readonly symbols: readonly LuaSymbol[];
-  readonly extends: readonly LuaExtend[];
+  readonly symbols: readonly ParsedSymbol[];
+  readonly extends: readonly ParsedExtend[];
 };
 
 export async function rebuildExtendsRelationships(
@@ -67,17 +67,17 @@ async function insertExtendsRelationships(
 }
 
 type SymbolIndex = {
-  readonly uniqueSymbols: ReadonlyMap<string, LuaSymbol>;
+  readonly uniqueSymbols: ReadonlyMap<string, ParsedSymbol>;
 };
 
-function createSymbolIndex(symbols: readonly LuaSymbol[]): SymbolIndex {
+function createSymbolIndex(symbols: readonly ParsedSymbol[]): SymbolIndex {
   return {
     uniqueSymbols: createUniqueSymbolMap(symbols),
   };
 }
 
-function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): ReadonlyMap<string, LuaSymbol> {
-  const groups = new Map<string, LuaSymbol[]>();
+function createUniqueSymbolMap(symbols: readonly ParsedSymbol[]): ReadonlyMap<string, ParsedSymbol> {
+  const groups = new Map<string, ParsedSymbol[]>();
 
   for (const symbol of symbols) {
     groups.set(symbol.qualifiedName, [...(groups.get(symbol.qualifiedName) ?? []), symbol]);
@@ -85,16 +85,16 @@ function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): ReadonlyMap<strin
 
   return new Map(
     [...groups]
-      .filter((entry): entry is [string, [LuaSymbol]] => entry[1].length === 1)
+      .filter((entry): entry is [string, [ParsedSymbol]] => entry[1].length === 1)
       .map(([qualifiedName, [symbol]]) => [qualifiedName, symbol]),
   );
 }
 
 function resolveParentSymbol(
-  localSymbols: readonly LuaSymbol[],
-  relationship: LuaExtend,
+  localSymbols: readonly ParsedSymbol[],
+  relationship: ParsedExtend,
   symbolIndex: SymbolIndex,
-): LuaSymbol | undefined {
+): ParsedSymbol | undefined {
   return (
     resolveSingleLocalSymbol(localSymbols, relationship.parentQualifiedName) ??
     symbolIndex.uniqueSymbols.get(relationship.parentQualifiedName)
@@ -102,17 +102,17 @@ function resolveParentSymbol(
 }
 
 function resolveLocalSymbol(
-  symbols: readonly LuaSymbol[],
+  symbols: readonly ParsedSymbol[],
   qualifiedName: string,
   line: number,
-): LuaSymbol | undefined {
+): ParsedSymbol | undefined {
   return symbols.find((symbol) => symbol.qualifiedName === qualifiedName && symbol.startLine === line);
 }
 
 function resolveSingleLocalSymbol(
-  symbols: readonly LuaSymbol[],
+  symbols: readonly ParsedSymbol[],
   qualifiedName: string,
-): LuaSymbol | undefined {
+): ParsedSymbol | undefined {
   const matches = symbols.filter((symbol) => symbol.qualifiedName === qualifiedName);
 
   return matches.length === 1 ? matches[0] : undefined;

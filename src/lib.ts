@@ -2,7 +2,7 @@ export {
   type CodeSnippetRequest,
   type CodeSnippetResult,
   readCodeSnippet,
-} from "./code.js";
+} from "./core/code.js";
 export {
   configPath,
   defaultConfig,
@@ -11,27 +11,38 @@ export {
   readConfig,
   validateConfig,
   writeConfig,
-} from "./config.js";
-export { indexProject, type IndexProjectOptions } from "./indexer.js";
-export { createInitPlan, initializeProject } from "./init.js";
-export { extractLuaSymbols, parseLuaFile } from "./parser.js";
-export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./path.js";
-export { queryProject, type QueryProjectOptions } from "./query.js";
-export { sampleProject, type SampleProjectOptions } from "./sample.js";
-export { scanLuaFiles } from "./scanner.js";
-export { startServer, type ServerHandle, type ServerOptions } from "./server.js";
-export { getProjectStatus } from "./status.js";
-export { getKuzuDatabasePath, initializeStore, schemaStatements } from "./store.js";
+} from "./core/config.js";
+export { indexProject, type IndexProjectOptions } from "./core/indexer.js";
+export { createInitPlan, initializeProject } from "./core/init.js";
+export { extractLuaSymbols, parseLuaFile } from "./ast/lua/parser.js";
+export { normalizeRepositoryPath, resolveSafeRepositoryPath } from "./core/path.js";
+export { queryProject, type QueryProjectOptions } from "./core/query.js";
+export { sampleProject, type SampleProjectOptions } from "./core/sample.js";
+export { scanLuaFiles } from "./core/scanner.js";
+export { startServer, type ServerHandle, type ServerOptions } from "./web/server.js";
+export { getProjectStatus } from "./core/status.js";
+export { getKuzuDatabasePath, initializeStore, schemaStatements } from "./core/store.js";
+export type {
+  LuaCall,
+  LuaExtend,
+  LuaFile,
+  LuaRequire,
+  LuaSymbol,
+  NormalizedPath,
+  ParsedCall,
+  ParsedExtend,
+  ParsedFile,
+  ParsedRequire,
+  ParsedSymbol,
+  SymbolKind,
+} from "./ast/types.js";
 export type {
   IndexResult,
   InitPlan,
   InitResult,
-  LuaCall,
-  LuaFile,
   LuaGraphConfig,
+  LuaGraphImpactResult,
   LuaGraphQueryResult,
-  LuaSymbol,
-  NormalizedPath,
   QueryCallEdge,
   QueryFileNode,
   QueryNode,
@@ -41,5 +52,4 @@ export type {
   SchemaStatement,
   ScannedLuaFile,
   StatusResult,
-  SymbolKind,
-} from "./types.js";
+} from "./core/project-types.js";

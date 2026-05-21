@@ -2,7 +2,8 @@ import { readdir, stat } from "node:fs/promises";
 import nodePath from "node:path";
 
 import { normalizeRepositoryPath } from "./path.js";
-import type { LuaGraphConfig, NormalizedPath, ScannedLuaFile } from "./types.js";
+import type { NormalizedPath } from "../ast/types.js";
+import type { LuaGraphConfig, ScannedLuaFile } from "./project-types.js";
 
 export async function scanLuaFiles(
   projectRoot: string,

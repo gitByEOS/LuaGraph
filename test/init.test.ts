@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { initializeProject } from "../src/init.js";
-import type { LuaGraphConfig } from "../src/types.js";
+import { initializeProject } from "../src/core/init.js";
+import type { LuaGraphConfig } from "../src/core/project-types.js";
 
 const tempRoots: string[] = [];
 

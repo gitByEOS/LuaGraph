@@ -1,10 +1,10 @@
 import { Connection, type QueryResult } from "kuzu";
 
-import type { LuaCall, LuaSymbol } from "./types.js";
+import type { ParsedCall, ParsedSymbol } from "../types.js";
 
 export type ParsedCallGraphFile = {
-  readonly symbols: readonly LuaSymbol[];
-  readonly calls: readonly LuaCall[];
+  readonly symbols: readonly ParsedSymbol[];
+  readonly calls: readonly ParsedCall[];
 };
 
 export async function rebuildCallsRelationships(
@@ -70,19 +70,19 @@ async function insertCallsRelationships(
 }
 
 type SymbolIndex = {
-  readonly uniqueSymbols: ReadonlyMap<string, LuaSymbol>;
-  readonly classesByName: ReadonlyMap<string, readonly LuaSymbol[]>;
+  readonly uniqueSymbols: ReadonlyMap<string, ParsedSymbol>;
+  readonly classesByName: ReadonlyMap<string, readonly ParsedSymbol[]>;
 };
 
-function createSymbolIndex(symbols: readonly LuaSymbol[]): SymbolIndex {
+function createSymbolIndex(symbols: readonly ParsedSymbol[]): SymbolIndex {
   return {
     uniqueSymbols: createUniqueSymbolMap(symbols),
     classesByName: createClassesByNameMap(symbols),
   };
 }
 
-function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): ReadonlyMap<string, LuaSymbol> {
-  const groups = new Map<string, LuaSymbol[]>();
+function createUniqueSymbolMap(symbols: readonly ParsedSymbol[]): ReadonlyMap<string, ParsedSymbol> {
+  const groups = new Map<string, ParsedSymbol[]>();
 
   for (const symbol of symbols) {
     groups.set(symbol.qualifiedName, [...(groups.get(symbol.qualifiedName) ?? []), symbol]);
@@ -90,13 +90,13 @@ function createUniqueSymbolMap(symbols: readonly LuaSymbol[]): ReadonlyMap<strin
 
   return new Map(
     [...groups]
-      .filter((entry): entry is [string, [LuaSymbol]] => entry[1].length === 1)
+      .filter((entry): entry is [string, [ParsedSymbol]] => entry[1].length === 1)
       .map(([qualifiedName, [symbol]]) => [qualifiedName, symbol]),
   );
 }
 
-function createClassesByNameMap(symbols: readonly LuaSymbol[]): ReadonlyMap<string, readonly LuaSymbol[]> {
-  const groups = new Map<string, LuaSymbol[]>();
+function createClassesByNameMap(symbols: readonly ParsedSymbol[]): ReadonlyMap<string, readonly ParsedSymbol[]> {
+  const groups = new Map<string, ParsedSymbol[]>();
 
   for (const symbol of symbols) {
     if (symbol.kind !== "class") {
@@ -111,9 +111,9 @@ function createClassesByNameMap(symbols: readonly LuaSymbol[]): ReadonlyMap<stri
 
 function resolveCallTarget(
   file: ParsedCallGraphFile,
-  call: LuaCall,
+  call: ParsedCall,
   symbolIndex: SymbolIndex,
-): LuaSymbol | undefined {
+): ParsedSymbol | undefined {
   const constructorTarget = resolveConstructorTarget(file, call, symbolIndex);
 
   return constructorTarget ?? symbolIndex.uniqueSymbols.get(call.calleeQualifiedName);
@@ -121,9 +121,9 @@ function resolveCallTarget(
 
 function resolveConstructorTarget(
   file: ParsedCallGraphFile,
-  call: LuaCall,
+  call: ParsedCall,
   symbolIndex: SymbolIndex,
-): LuaSymbol | undefined {
+): ParsedSymbol | undefined {
   const className = getConstructorClassName(call.calleeQualifiedName);
 
   if (className === undefined) {
@@ -144,27 +144,27 @@ function getConstructorClassName(calleeQualifiedName: string): string | undefine
   return match?.groups?.className;
 }
 
-function findSingleClass(symbols: readonly LuaSymbol[], className: string): LuaSymbol | undefined {
+function findSingleClass(symbols: readonly ParsedSymbol[], className: string): ParsedSymbol | undefined {
   const classes = symbols.filter((symbol) => symbol.kind === "class" && symbol.qualifiedName === className);
 
   return classes.length === 1 ? classes[0] : undefined;
 }
 
-function findCallerSymbol(symbols: readonly LuaSymbol[], call: LuaCall): LuaSymbol | undefined {
+function findCallerSymbol(symbols: readonly ParsedSymbol[], call: ParsedCall): ParsedSymbol | undefined {
   return symbols
     .filter((symbol) => isCallableSymbol(symbol) && containsLine(symbol, call.line))
     .sort(compareSymbolScope)[0];
 }
 
-function isCallableSymbol(symbol: LuaSymbol): boolean {
+function isCallableSymbol(symbol: ParsedSymbol): boolean {
   return symbol.kind === "function" || symbol.kind === "method";
 }
 
-function containsLine(symbol: LuaSymbol, line: number): boolean {
+function containsLine(symbol: ParsedSymbol, line: number): boolean {
   return symbol.startLine <= line && line <= symbol.endLine;
 }
 
-function compareSymbolScope(left: LuaSymbol, right: LuaSymbol): number {
+function compareSymbolScope(left: ParsedSymbol, right: ParsedSymbol): number {
   const leftSpan = left.endLine - left.startLine;
   const rightSpan = right.endLine - right.startLine;
 

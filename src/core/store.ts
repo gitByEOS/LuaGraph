@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { Connection, Database, type QueryResult } from "kuzu";
 
-import type { SchemaStatement } from "./types.js";
+import type { SchemaStatement } from "./project-types.js";
 
 export const schemaStatements: readonly SchemaStatement[] = [
   {

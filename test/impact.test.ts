@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { impactProject } from "../src/impact.js";
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
+import { impactProject } from "../src/core/impact.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
 
 const tempRoots: string[] = [];
 

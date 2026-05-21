@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { indexProject } from "../src/indexer.js";
-import { initializeProject } from "../src/init.js";
-import { sampleProject } from "../src/sample.js";
+import { indexProject } from "../src/core/indexer.js";
+import { initializeProject } from "../src/core/init.js";
+import { sampleProject } from "../src/core/sample.js";
 
 const tempRoots: string[] = [];
 
