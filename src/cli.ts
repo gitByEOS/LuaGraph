@@ -16,14 +16,59 @@ import { getProjectStatus } from "./status.js";
 import { syncProject } from "./syncer.js";
 import type { SampleResult, SyncResult } from "./types.js";
 
+const queryHelpText = `
+查询表达式:
+  name:<symbol>              按符号名或 qualifiedName 查询
+  kind:<kind>                按类型查询，如 class、function、method、file
+  callers:<symbol>           查询谁调用了该符号，用于看影响范围
+  callees:<symbol>           查询该符号调用了谁，用于看内部依赖
+  kind:<kind> name:<symbol>  组合过滤
+
+示例:
+  luagraph query name:ThemeCollectDialog --format table
+  luagraph query kind:class --format table
+  luagraph query callers:ThemeCollectDialog --depth 2 --format tree
+  luagraph query callees:ThemeProgressDialog:collectMaterial --depth 2 --format tree
+  luagraph query kind:method name:collectMaterial --format table
+`;
+
+const impactHelpText = `
+说明:
+  impact 从文件或符号出发，沿 Calls 反向关系查找受影响调用者。
+  文件输入会先定位该文件内的 Symbol，再分析反向调用链。
+
+示例:
+  luagraph impact ThemeCollectDialog --format table
+  luagraph impact ThemeCollectDialog --depth 2 --format tree
+  luagraph impact Diner/DinerDialogs.lua --format json
+`;
+
+const indexHelpText = `
+示例:
+  luagraph index .
+  luagraph index /path/to/lua-project --force --format json
+  luagraph index . --quiet
+`;
+
+const syncHelpText = `
+说明:
+  sync 基于 contentHash 刷新增、改、删的 Lua 文件。
+  非 quiet 模式下进度写入 stderr，json/table 结果写入 stdout。
+
+示例:
+  luagraph sync .
+  luagraph sync /path/to/lua-project --format table
+  luagraph sync . --quiet
+`;
+
 export function createCli(): Command {
   const program = new Command();
 
-  program.name("luagraph").description("LuaGraph local semantic graph CLI").version("0.1.0");
+  program.name("luagraph").description("LuaGraph 本地 Lua 语义图谱 CLI").version("0.1.0");
 
   program
     .command("init")
-    .argument("[project_root]", "项目根目录")
+    .argument("[project_root]", "要初始化的 Lua 项目根目录")
     .description("初始化 LuaGraph 项目")
     .action(async (projectRoot?: string) => {
       if (projectRoot === undefined || projectRoot.length === 0) {
@@ -41,8 +86,8 @@ export function createCli(): Command {
 
   program
     .command("status")
-    .argument("[project_root]", "项目根目录，默认当前目录")
-    .option("--project-root <path>", "项目根目录")
+    .argument("[project_root]", "Lua 项目根目录，默认当前目录")
+    .option("--project-root <path>", "Lua 项目根目录，优先级高于位置参数")
     .description("统计 LuaGraph 项目状态")
     .action(async (projectRoot?: string, options?: { readonly projectRoot?: string }) => {
       const targetProjectRoot = projectRoot ?? options?.projectRoot ?? process.cwd();
@@ -57,9 +102,9 @@ export function createCli(): Command {
 
   program
     .command("sample")
-    .argument("[project_root]", "项目根目录，默认当前目录")
-    .option("--limit <n>", "抽查符号数量", "20")
-    .option("--format <format>", "输出格式：json|table", "json")
+    .argument("[project_root]", "Lua 项目根目录，默认当前目录")
+    .option("--limit <n>", "最多抽查的符号数量", "20")
+    .option("--format <format>", "输出格式：json 或 table", "json")
     .description("抽查已索引的 Lua 符号")
     .action(async (projectRoot?: string, options?: SampleCommandOptions) => {
       const outputFormat = parseSampleOutputFormat(options?.format ?? "json");
@@ -85,10 +130,10 @@ export function createCli(): Command {
 
   program
     .command("query")
-    .argument("<expression...>", "查询表达式，如 name:init 或 kind:function name:init")
-    .option("--format <format>", "输出格式：json|table|tree", "json")
-    .option("--depth <n>", "调用关系查询深度", "1")
-    .option("--project-root <path>", "项目根目录，默认当前目录")
+    .argument("<expression...>", "查询表达式，见下方“查询表达式”说明")
+    .option("--format <format>", "输出格式：json、table 或 tree", "json")
+    .option("--depth <n>", "callers/callees 关系展开深度", "1")
+    .option("--project-root <path>", "Lua 项目根目录，默认当前目录")
     .description("查询已索引的 LuaGraph 图")
     .action(async (expressionParts: string[], options?: QueryCommandOptions) => {
       const outputFormat = parseQueryOutputFormat(options?.format ?? "json");
@@ -117,10 +162,10 @@ export function createCli(): Command {
   program
     .command("impact")
     .argument("<file-or-symbol>", "文件路径、符号名或 qualifiedName")
-    .option("--format <format>", "输出格式：json|table|tree", "json")
-    .option("--depth <n>", "影响分析深度", "2")
-    .option("--project-root <path>", "项目根目录，默认当前目录")
-    .description("基于 Calls 反向关系分析受影响 Symbol")
+    .option("--format <format>", "输出格式：json、table 或 tree", "json")
+    .option("--depth <n>", "反向调用链展开深度", "2")
+    .option("--project-root <path>", "Lua 项目根目录，默认当前目录")
+    .description("分析文件或符号的反向调用影响范围")
     .action(async (input: string, options?: ImpactCommandOptions) => {
       const outputFormat = parseGraphOutputFormat(options?.format ?? "json");
       const depth = parseGraphDepth(options?.depth ?? "2");
@@ -145,7 +190,7 @@ export function createCli(): Command {
 
   program
     .command("serve")
-    .argument("[project_root]", "项目根目录，默认当前目录")
+    .argument("[project_root]", "Lua 项目根目录，默认当前目录")
     .option("--port <port>", "HTTP 端口，默认随机可用端口", "0")
     .option("--open", "启动后用系统默认浏览器打开")
     .description("启动 LuaGraph 本地可视化服务")
@@ -171,10 +216,10 @@ export function createCli(): Command {
 
   program
     .command("index")
-    .argument("[project_root]", "项目根目录，默认当前目录")
+    .argument("[project_root]", "Lua 项目根目录，默认当前目录")
     .option("--force", "强制重建索引")
-    .option("--quiet", "静默执行，不输出结果")
-    .option("--format <format>", "输出格式：json|table", "json")
+    .option("--quiet", "静默执行，不输出进度和结果")
+    .option("--format <format>", "输出格式：json 或 table", "json")
     .description("索引 Lua 符号并写入 Kuzu 图数据库")
     .action(async (projectRoot?: string, options?: IndexCommandOptions) => {
       const outputFormat = parseIndexOutputFormat(options?.format ?? "json");
@@ -204,9 +249,9 @@ export function createCli(): Command {
 
   program
     .command("sync")
-    .argument("[project_root]", "项目根目录，默认当前目录")
-    .option("--quiet", "静默执行，不输出结果")
-    .option("--format <format>", "输出格式：json|table", "json")
+    .argument("[project_root]", "Lua 项目根目录，默认当前目录")
+    .option("--quiet", "静默执行，不输出进度和结果")
+    .option("--format <format>", "输出格式：json 或 table", "json")
     .description("基于 contentHash 增量刷新 LuaGraph 索引")
     .action(async (projectRoot?: string, options?: SyncCommandOptions) => {
       const outputFormat = parseSyncOutputFormat(options?.format ?? "json");
@@ -232,6 +277,11 @@ export function createCli(): Command {
         program.error(error instanceof Error ? error.message : String(error));
       }
     });
+
+  appendHelpFooter(program, "query", queryHelpText);
+  appendHelpFooter(program, "impact", impactHelpText);
+  appendHelpFooter(program, "index", indexHelpText);
+  appendHelpFooter(program, "sync", syncHelpText);
 
   return program;
 }
@@ -282,6 +332,17 @@ type ServeCommandOptions = {
 type IndexOutputFormat = "json" | "table";
 type SampleOutputFormat = "json" | "table";
 type SyncOutputFormat = "json" | "table";
+
+function appendHelpFooter(program: Command, commandName: string, footer: string): void {
+  const command = program.commands.find((item) => item.name() === commandName);
+
+  if (command === undefined) {
+    throw new Error(`命令不存在: ${commandName}`);
+  }
+
+  const readHelp = command.helpInformation.bind(command);
+  command.helpInformation = () => `${readHelp()}${footer}`;
+}
 
 function parseIndexOutputFormat(value: string): IndexOutputFormat | undefined {
   return value === "json" || value === "table" ? value : undefined;

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import type { Command } from "commander";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCli } from "../src/cli.js";
@@ -293,6 +294,32 @@ describe("luagraph query CLI", () => {
       log.mockRestore();
     }
   });
+
+  it("help 清楚说明表达式、格式和示例", () => {
+    const cli = createTestCli();
+    const query = getCommand(cli, "query");
+    const helpText = query.helpInformation();
+
+    expect(helpText).toContain("name:<symbol>");
+    expect(helpText).toContain("kind:<kind>");
+    expect(helpText).toContain("callers:<symbol>");
+    expect(helpText).toContain("callees:<symbol>");
+    expect(helpText).toContain("输出格式：json、table 或 tree");
+    expect(helpText).toContain("luagraph query callers:ThemeCollectDialog --depth 2 --format tree");
+  });
+});
+
+describe("luagraph help 文案规范", () => {
+  it("常用命令说明参数范围和示例", () => {
+    const cli = createTestCli();
+
+    expect(getCommand(cli, "impact").helpInformation()).toContain("反向调用影响范围");
+    expect(getCommand(cli, "impact").helpInformation()).toContain("luagraph impact ThemeCollectDialog --format table");
+    expect(getCommand(cli, "index").helpInformation()).toContain("输出格式：json 或 table");
+    expect(getCommand(cli, "index").helpInformation()).toContain("luagraph index /path/to/lua-project --force --format json");
+    expect(getCommand(cli, "sync").helpInformation()).toContain("进度写入 stderr");
+    expect(getCommand(cli, "sync").helpInformation()).toContain("luagraph sync /path/to/lua-project --format table");
+  });
 });
 
 describe("luagraph sample CLI", () => {
@@ -367,6 +394,16 @@ describe("luagraph serve CLI", () => {
 
 function createTestCli() {
   return createCli().exitOverride();
+}
+
+function getCommand(cli: ReturnType<typeof createCli>, name: string): Command {
+  const command = cli.commands.find((item) => item.name() === name);
+
+  if (command === undefined) {
+    throw new Error(`命令不存在: ${name}`);
+  }
+
+  return command;
 }
 
 async function createTempProject(): Promise<string> {
