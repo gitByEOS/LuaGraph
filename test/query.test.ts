@@ -123,6 +123,30 @@ describe("queryProject", () => {
     expect(childResult.edges[0]?.target).toContain("#class#Child#");
   });
 
+  it("subclasses 返回 class(name, parent) 的多个子类", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "SlotsNew/delegate.lua",
+      [
+        "SlotsBaseDelegate = {}",
+        "SlotsMarketDelegate = class('SlotsMarketDelegate', SlotsBaseDelegate)",
+        "SlotsSystemDelegate = class('SlotsSystemDelegate', SlotsBaseDelegate)",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await queryProject(projectRoot, "subclasses:SlotsBaseDelegate");
+
+    expect(result.nodes.map((node) => (node.type === "Symbol" ? node.qualifiedName : node.path))).toEqual([
+      "SlotsMarketDelegate",
+      "SlotsSystemDelegate",
+    ]);
+    expect(result.edges).toHaveLength(2);
+  });
+
   it("查询 requires 和 dependents 文件依赖", async () => {
     const projectRoot = await createTempProject();
     await writeLuaFile(projectRoot, "src/main.lua", 'local utils = require("utils")\n');
@@ -165,6 +189,54 @@ describe("queryProject", () => {
       count: 1,
       edges: [{ kind: "Requires", source: "src/main.lua", target: "src/utils.lua" }],
     });
+  });
+
+  it("requires 和 dependents 支持路径片段匹配", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "SlotsNew/feature/ThemeExpandSymbolFeature.lua", "require 'SlotsNew.feature.ThemeFeatureBase'\n");
+    await writeLuaFile(projectRoot, "SlotsNew/feature/ThemeCollectSymbolFeature.lua", "require 'SlotsNew.feature.ThemeFeatureBase'\n");
+    await writeLuaFile(projectRoot, "SlotsNew/feature/ThemeFeatureBase.lua", "ThemeFeatureBase = {}\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const requiresResult = await queryProject(projectRoot, "requires:ThemeExpandSymbolFeature");
+    const dependentsResult = await queryProject(projectRoot, "dependents:FeatureBase");
+
+    expect(requiresResult.nodes.map((node) => (node.type === "File" ? node.path : node.filePath))).toEqual([
+      "SlotsNew/feature/ThemeFeatureBase.lua",
+    ]);
+    expect(dependentsResult.nodes.map((node) => (node.type === "File" ? node.path : node.filePath))).toEqual([
+      "SlotsNew/feature/ThemeCollectSymbolFeature.lua",
+      "SlotsNew/feature/ThemeExpandSymbolFeature.lua",
+    ]);
+    expect(dependentsResult.edges).toHaveLength(2);
+  });
+
+  it("requires 和 dependents 兼容 ./ 和绝对路径查询", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "Systems/ThemeMain.lua", 'require("ThemeFeatureBase")\n');
+    await writeLuaFile(projectRoot, "Systems/ThemeFeatureBase.lua", "ThemeFeatureBase = {}\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const dotSlashResult = await queryProject(projectRoot, "requires:./Systems/ThemeMain.lua");
+    const absolutePathResult = await queryProject(
+      projectRoot,
+      `dependents:${join(projectRoot, "Systems/ThemeFeatureBase.lua")}`,
+    );
+
+    expect(dotSlashResult.edges).toEqual([
+      expect.objectContaining({
+        source: "Systems/ThemeMain.lua",
+        target: "Systems/ThemeFeatureBase.lua",
+      }),
+    ]);
+    expect(absolutePathResult.edges).toEqual([
+      expect.objectContaining({
+        source: "Systems/ThemeMain.lua",
+        target: "Systems/ThemeFeatureBase.lua",
+      }),
+    ]);
   });
 });
 

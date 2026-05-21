@@ -55,7 +55,7 @@ luagraph serve [project_root] --port <port> --open
 - `[project_root]` 默认当前目录；`--port` 不传时使用随机可用端口并输出实际 URL。
 - `--open` 会用系统默认浏览器打开服务地址。
 - 第一版展示 File/Symbol 节点与 Contains 关系，支持搜索高亮、邻居高亮和点击符号查看源码片段。
-- 当前限制：只读取已完成 `init` 和 `index` 的本地图数据库；Web 以 File、Symbol、Contains 和源码片段为主；Requires 和 Extends 已在 CLI 最小闭环可用，Web 暂不展示；不承诺 upvalue 分析。
+- 当前限制：只读取已完成 `init` 和 `index` 的本地图数据库；Web 展示 File、Symbol、Contains、Requires、Extends 和源码片段；不承诺 upvalue 分析。
 
 ## 验收标准
 

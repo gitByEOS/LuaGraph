@@ -23,7 +23,7 @@ export type ServerHandle = {
 
 type GraphNode = {
   readonly id: string;
-  readonly type: "File" | "Symbol";
+  readonly type: "File" | "Symbol" | "Module";
   readonly kind: string;
   readonly label: string;
   readonly filePath: string;
@@ -34,10 +34,17 @@ type GraphNode = {
 type GraphEdge = {
   readonly source: string;
   readonly target: string;
-  readonly kind: "Contains";
+  readonly kind: "Contains" | "Extends" | "Requires";
+  readonly moduleName?: string;
+  readonly isResolved?: boolean;
 };
 
 type GraphResult = {
+  readonly nodes: readonly GraphNode[];
+  readonly edges: readonly GraphEdge[];
+};
+
+type RequiresGraph = {
   readonly nodes: readonly GraphNode[];
   readonly edges: readonly GraphEdge[];
 };
@@ -132,9 +139,19 @@ async function readProjectGraph(projectRoot: string): Promise<GraphResult> {
   const connection = new Connection(database);
 
   try {
+    const requiresGraph = await readRequiresGraph(connection);
+
     return {
-      nodes: [...(await readFileNodes(connection)), ...(await readSymbolNodes(connection))],
-      edges: await readContainsEdges(connection),
+      nodes: [
+        ...(await readFileNodes(connection)),
+        ...(await readSymbolNodes(connection)),
+        ...requiresGraph.nodes,
+      ],
+      edges: [
+        ...(await readContainsEdges(connection)),
+        ...(await readExtendsEdges(connection)),
+        ...requiresGraph.edges,
+      ],
     };
   } finally {
     await connection.close();
@@ -192,6 +209,65 @@ async function readContainsEdges(connection: Connection): Promise<GraphEdge[]> {
     target: String(row.target),
     kind: "Contains",
   }));
+}
+
+async function readExtendsEdges(connection: Connection): Promise<GraphEdge[]> {
+  const rows = await queryRows(
+    connection,
+    "MATCH (source:Symbol)-[edge:Extends]->(target:Symbol) RETURN source.id AS source, target.id AS target;",
+  );
+
+  return rows.map((row) => ({
+    source: String(row.source),
+    target: String(row.target),
+    kind: "Extends",
+  }));
+}
+
+async function readRequiresGraph(connection: Connection): Promise<RequiresGraph> {
+  const rows = await queryRows(
+    connection,
+    "MATCH (source:File)-[edge:Requires]->(target:File) RETURN source.path AS source, target.path AS target, edge.moduleName AS moduleName, edge.isResolved AS isResolved;",
+  );
+  const moduleNodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  for (const row of rows) {
+    const source = String(row.source);
+    const moduleName = String(row.moduleName ?? "");
+    const isResolved = Boolean(row.isResolved);
+    const target = isResolved ? String(row.target) : createModuleNodeId(source, moduleName);
+
+    if (!isResolved) {
+      moduleNodes.push(createModuleNode(source, moduleName, target));
+    }
+
+    edges.push({
+      source,
+      target,
+      kind: "Requires",
+      moduleName,
+      isResolved,
+    });
+  }
+
+  return { nodes: moduleNodes, edges };
+}
+
+function createModuleNode(sourcePath: string, moduleName: string, id: string): GraphNode {
+  return {
+    id,
+    type: "Module",
+    kind: "module",
+    label: moduleName,
+    filePath: sourcePath,
+    startLine: null,
+    signature: "unresolved require",
+  };
+}
+
+function createModuleNodeId(sourcePath: string, moduleName: string): string {
+  return `module:${sourcePath}:${moduleName}`;
 }
 
 async function queryRows(connection: Connection, cypher: string): Promise<Record<string, unknown>[]> {

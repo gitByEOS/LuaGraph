@@ -167,8 +167,8 @@ luagraph query callers:init --depth 2
 luagraph query callees:init --format tree
 luagraph query extends:Child --format table
 luagraph query subclasses:Base --depth 2 --format tree
-luagraph query requires:src/main.lua --format json
-luagraph query dependents:src/utils.lua --format json
+luagraph query requires:main --format json
+luagraph query dependents:utils --format json
 luagraph query name:init --project-root /path/to/your/lua/project --format table
 ```
 
@@ -213,15 +213,14 @@ node dist/cli.js serve /path/to/your/lua/project --port 43210 --open
 ```
 
 第一版能力：
-- 展示 File、Symbol 节点和 Contains 关系。
+- 展示 File、Symbol 节点和 Contains、Extends、Requires 关系。
 - 搜索命中节点高亮，并保留相邻节点帮助定位结构。
 - 点击 Symbol 节点后通过 `/api/code` 读取源码片段。
 
 当前限制：
 - 需要先执行 `init` 和 `index`，索引刷新由 CLI `sync` 执行。
-- Web 仍以 File、Symbol、Contains 和源码片段为主。
+- Web 读取已索引图数据。
 - Extends 仅识别确定的 `Child = setmetatable({}, { __index = Parent })` 和 `local Child = ...` 模式。
-- Requires 已在 CLI 最小闭环可用；Web 暂不展示 Requires。
 - 不承诺 upvalue 分析。
 - 不提供前端构建链，不监听文件变化。
 
@@ -248,7 +247,7 @@ node dist/cli.js sample
 node dist/cli.js status
 node dist/cli.js query callers:init --depth 2 --format tree
 node dist/cli.js query subclasses:Base --depth 2 --format tree
-node dist/cli.js query requires:src/main.lua --format json
+node dist/cli.js query requires:main --format json
 node dist/cli.js impact init --format table
 
 # 查看可视化

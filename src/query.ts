@@ -270,8 +270,9 @@ async function executeRequireQuery(
 ): Promise<Pick<LuaGraphQueryResult, "nodes" | "edges">> {
   const nodesById = new Map<string, QueryNode>();
   const edgesByKey = new Map<string, QueryRequireEdge>();
-  const visited = new Set([relationTerm.value]);
-  let frontier = [relationTerm.value];
+  const seedPaths = await queryRequireSeedPaths(connection, relationTerm.value);
+  const visited = new Set(seedPaths);
+  let frontier = seedPaths;
 
   for (let level = 0; level < depth && frontier.length > 0; level += 1) {
     const nextFrontier: string[] = [];
@@ -300,6 +301,32 @@ async function executeRequireQuery(
     nodes: sortNodes([...nodesById.values()]),
     edges: sortEdges([...edgesByKey.values()]),
   };
+}
+
+async function queryRequireSeedPaths(connection: Connection, pathQuery: string): Promise<string[]> {
+  const rows = await queryRows(connection, "MATCH (file:File) RETURN file.path AS path;");
+
+  return rows
+    .map((row) => readString(row.path, "path"))
+    .filter((path) => isPathQueryMatched(path, pathQuery))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function isPathQueryMatched(path: string, pathQuery: string): boolean {
+  const normalizedPath = path.toLowerCase();
+  const normalizedQuery = normalizePathQuery(pathQuery);
+
+  return (
+    normalizedPath.includes(normalizedQuery) ||
+    normalizedQuery.endsWith(`/${normalizedPath}`)
+  );
+}
+
+function normalizePathQuery(pathQuery: string): string {
+  return pathQuery
+    .replaceAll("\\", "/")
+    .replace(/^\.\/+/, "")
+    .toLowerCase();
 }
 
 async function querySeedSymbols(

@@ -19,14 +19,15 @@ type FunctionScope = {
 };
 
 const classPattern =
-  /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*class\s*\(\s*["'](?<literal>[A-Za-z_][A-Za-z0-9_]*)["']/;
+  /^(?<indent>\s*)(?<local>local\s+)?(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*class\s*\(\s*["'](?<literal>[A-Za-z_][A-Za-z0-9_]*)["'](?:\s*,\s*(?<parent>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*))?/;
 const tablePattern = /^(?<indent>\s*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\{|$)/;
 const setmetatableExtendsPattern =
   /^(?<indent>\s*)(?<local>local\s+)?(?<child>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*setmetatable\s*\(\s*\{\s*\}\s*,\s*\{\s*__index\s*=\s*(?<parent>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\s*\)/;
 const functionPattern =
   /^(?<indent>\s*)(?<local>local\s+)?function\s+(?<qualifiedName>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/;
 const callPattern = /(?<![A-Za-z0-9_])(?<callee>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*)\s*\(/g;
-const requirePattern = /(?<![A-Za-z0-9_])require\s*\(\s*(?<expression>[^)]*?)\s*\)/g;
+const requirePattern =
+  /(?<![A-Za-z0-9_])require\s*(?:\(\s*(?<parenthesizedExpression>[^)]*?)\s*\)|(?<bareExpression>["'][^"']+["']))/g;
 
 // Phase 1 最小提取：行级模式只识别声明入口，不伪装完整 Lua AST。
 export function parseLuaFile(pathValue: string, source: string): LuaFile {
@@ -62,7 +63,7 @@ export function extractLuaCalls(filePath: NormalizedPath, source: string): reado
 export function extractLuaExtends(filePath: NormalizedPath, source: string): readonly LuaExtend[] {
   return source
     .split(/\r\n|\n|\r/)
-    .flatMap((line, index) => parseExtendsLine(filePath, stripLuaLine(line), index + 1));
+    .flatMap((line, index) => parseExtendsLine(filePath, stripLuaComment(line), index + 1));
 }
 
 export function extractLuaRequires(filePath: NormalizedPath, source: string): readonly LuaRequire[] {
@@ -151,13 +152,13 @@ function parseExtendsLine(
   strippedLine: string,
   lineNumber: number,
 ): readonly LuaExtend[] {
-  const match = setmetatableExtendsPattern.exec(strippedLine);
+  const match = setmetatableExtendsPattern.exec(strippedLine) ?? classPattern.exec(strippedLine);
 
   if (match?.groups === undefined) {
     return [];
   }
 
-  const child = match.groups.child;
+  const child = match.groups.child ?? match.groups.name;
   const parent = match.groups.parent;
 
   if (child === undefined || parent === undefined || child === parent) {
@@ -184,7 +185,7 @@ function parseRequireLine(
   const requires: LuaRequire[] = [];
 
   for (const match of line.matchAll(requirePattern)) {
-    const expression = match.groups?.expression;
+    const expression = match.groups?.parenthesizedExpression ?? match.groups?.bareExpression;
     const callIndex = match.index;
     if (expression === undefined || callIndex === undefined || isInsideLuaString(line, callIndex)) {
       continue;
@@ -234,7 +235,7 @@ function parseClassLine(line: string, lineNumber: number): SymbolDraft | undefin
     startColumn: getDeclarationColumn(match.groups.indent),
     endColumn: line.length,
     signature: line.trim(),
-    isLocal: false,
+    isLocal: match.groups.local !== undefined,
   };
 }
 

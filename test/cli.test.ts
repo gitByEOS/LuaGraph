@@ -306,8 +306,8 @@ describe("luagraph query CLI", () => {
     expect(helpText).toContain("kind:<kind>");
     expect(helpText).toContain("callers:<symbol>");
     expect(helpText).toContain("callees:<symbol>");
-    expect(helpText).toContain("requires:<file>");
-    expect(helpText).toContain("dependents:<file>");
+    expect(helpText).toContain("requires:<path-part>");
+    expect(helpText).toContain("dependents:<path-part>");
     expect(helpText).toContain("输出格式：json、table 或 tree");
     expect(helpText).toContain("luagraph query callers:ThemeCollectDialog --depth 2 --format tree");
   });

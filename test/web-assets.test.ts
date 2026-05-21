@@ -51,7 +51,9 @@ describe("serve 静态 Web 资产", () => {
     expect(app).toContain("function scheduleSearch()");
     expect(app).toContain("payload.code");
     expect(app).toContain("function renderGraph()");
-    expect(app).toContain('edge.type === "Contains"');
+    expect(app).toContain("function isGraphRelation(type)");
+    expect(app).toContain('type === "Requires"');
+    expect(app).toContain('type === "Extends"');
     expect(app).toContain("searchableText(node)");
   });
 
@@ -91,6 +93,8 @@ describe("serve 静态 Web 资产", () => {
     expect(app).toContain("useUTC: false");
     expect(app).toContain("stateAnimation:");
     expect(app).toContain("aria:");
+    expect(app).toContain('return "#8bd5ca"');
+    expect(app).toContain('return "#c6a0f6"');
   });
 
   it("使用官方 graph-webkit-dep 力导参数", async () => {

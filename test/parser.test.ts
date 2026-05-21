@@ -88,7 +88,16 @@ describe("Lua parser Phase 1 最小提取", () => {
           isUnresolved: false,
         },
       ],
-      extends: [],
+      extends: [
+        {
+          type: "Extends",
+          filePath: "src/game.lua",
+          childQualifiedName: "SlotMachine",
+          parentQualifiedName: "BaseGame",
+          line: 1,
+          column: 1,
+        },
+      ],
       calls: [
         {
           type: "Call",
@@ -156,6 +165,7 @@ describe("Lua parser Phase 1 最小提取", () => {
     const source = [
       'local M = require("foo.bar")',
       'require("plain.module")',
+      "require 'SlotsNew.feature.ThemeFeatureBase'",
       'local D = require("base." .. name)',
       'local skipped = "-- require(\\"comment\\")"',
       '-- require("commented")',
@@ -183,9 +193,17 @@ describe("Lua parser Phase 1 最小提取", () => {
       {
         type: "Require",
         filePath: "src/main.lua",
+        moduleName: "SlotsNew.feature.ThemeFeatureBase",
+        isStatic: true,
+        line: 3,
+        column: 1,
+      },
+      {
+        type: "Require",
+        filePath: "src/main.lua",
         moduleName: '"base." .. name',
         isStatic: false,
-        line: 3,
+        line: 4,
         column: 11,
       },
     ]);
@@ -296,8 +314,12 @@ describe("Lua parser Phase 1 最小提取", () => {
   it("提取 setmetatable 的确定继承关系", () => {
     const source = [
       "Parent = {}",
+      "SlotsBaseDelegate = {}",
       "local Child = setmetatable({}, { __index = Parent })",
       "GrandChild = setmetatable({}, { __index = Child })",
+      "local ThemeExpandSymbolFeature = class('ThemeExpandSymbolFeature', ThemeFeatureBase)",
+      "SlotsMarketDelegate = class('SlotsMarketDelegate', SlotsBaseDelegate)",
+      "SlotsSystemDelegate = class('SlotsSystemDelegate', SlotsBaseDelegate)",
       "T.__index = T",
       "Dynamic = setmetatable({}, { __index = getParent() })",
     ].join("\n");
@@ -306,8 +328,12 @@ describe("Lua parser Phase 1 最小提取", () => {
 
     expect(file.symbols.map((symbol) => [symbol.kind, symbol.qualifiedName, symbol.isLocal])).toEqual([
       ["table", "Parent", false],
+      ["table", "SlotsBaseDelegate", false],
       ["class", "Child", true],
       ["class", "GrandChild", false],
+      ["class", "ThemeExpandSymbolFeature", true],
+      ["class", "SlotsMarketDelegate", false],
+      ["class", "SlotsSystemDelegate", false],
     ]);
     expect(file.extends).toEqual([
       {
@@ -315,7 +341,7 @@ describe("Lua parser Phase 1 最小提取", () => {
         filePath: "src/inherit.lua",
         childQualifiedName: "Child",
         parentQualifiedName: "Parent",
-        line: 2,
+        line: 3,
         column: 1,
       },
       {
@@ -323,7 +349,31 @@ describe("Lua parser Phase 1 最小提取", () => {
         filePath: "src/inherit.lua",
         childQualifiedName: "GrandChild",
         parentQualifiedName: "Child",
-        line: 3,
+        line: 4,
+        column: 1,
+      },
+      {
+        type: "Extends",
+        filePath: "src/inherit.lua",
+        childQualifiedName: "ThemeExpandSymbolFeature",
+        parentQualifiedName: "ThemeFeatureBase",
+        line: 5,
+        column: 1,
+      },
+      {
+        type: "Extends",
+        filePath: "src/inherit.lua",
+        childQualifiedName: "SlotsMarketDelegate",
+        parentQualifiedName: "SlotsBaseDelegate",
+        line: 6,
+        column: 1,
+      },
+      {
+        type: "Extends",
+        filePath: "src/inherit.lua",
+        childQualifiedName: "SlotsSystemDelegate",
+        parentQualifiedName: "SlotsBaseDelegate",
+        line: 7,
         column: 1,
       },
     ]);

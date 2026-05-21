@@ -172,14 +172,14 @@
       .concat(readArray(payload.contains))
       .concat(readArray(payload.containsEdges));
     const edges = rawEdges.map(toGraphEdge).filter((edge) => {
-      return edge.type === "Contains" && nodeIds.has(edge.source) && nodeIds.has(edge.target);
+      return isGraphRelation(edge.type) && nodeIds.has(edge.source) && nodeIds.has(edge.target);
     });
 
     return { nodes, edges };
   }
 
   function toGraphNode(raw) {
-    const type = raw.type === "File" ? "File" : raw.type === "Symbol" ? "Symbol" : raw.kind ? "Symbol" : "File";
+    const type = readNodeType(raw);
     const kind = type === "File" ? "File" : String(raw.kind || "Symbol");
     const filePath = String(raw.filePath || raw.path || "");
     const name = String(raw.name || raw.qualifiedName || raw.path || raw.id || "未命名节点");
@@ -202,12 +202,26 @@
     };
   }
 
+  function readNodeType(raw) {
+    if (raw.type === "File" || raw.type === "Symbol" || raw.type === "Module") {
+      return raw.type;
+    }
+
+    return raw.kind ? "Symbol" : "File";
+  }
+
   function toGraphEdge(raw) {
     return {
       source: String(raw.source || raw.from || raw.fromId || raw.parent || ""),
       target: String(raw.target || raw.to || raw.toId || raw.child || ""),
       type: String(raw.type || raw.kind || raw.label || "Contains"),
+      moduleName: String(raw.moduleName || ""),
+      isResolved: raw.isResolved === undefined ? undefined : Boolean(raw.isResolved),
     };
+  }
+
+  function isGraphRelation(type) {
+    return type === "Contains" || type === "Extends" || type === "Requires";
   }
 
   function uniqueById(nodes) {
@@ -372,7 +386,8 @@
         kind: node.kind,
         qualifiedName: node.qualifiedName,
         category: categoryIndexes.get(node.kind),
-        ...(node.type === "File" ? { symbolSize: 5 } : {}),
+      ...(node.type === "File" ? { symbolSize: 5 } : {}),
+      ...(node.type === "Module" ? { symbol: "diamond", symbolSize: 8 } : {}),
         itemStyle: {
           opacity,
         },
@@ -386,6 +401,13 @@
       source: edge.source,
       target: edge.target,
       type: edge.type,
+      moduleName: edge.moduleName,
+      isResolved: edge.isResolved,
+      lineStyle: {
+        color: edgeColor(edge.type),
+        opacity: edge.type === "Contains" ? 0.28 : 0.72,
+        type: edge.type === "Requires" ? "dashed" : "solid",
+      },
     }));
 
     chart.setOption(
@@ -395,7 +417,7 @@
         tooltip: {
           formatter: (params) => {
             if (params.dataType === "edge") {
-              return `${params.data.source} → ${params.data.target}<br/>Contains`;
+              return formatEdgeTooltip(params.data);
             }
 
             return `${params.data.kind}<br/>${params.data.qualifiedName || params.data.name}`;
@@ -460,6 +482,26 @@
     return Array.from(new Set(nodes.map((node) => node.kind)))
       .sort()
       .map((name) => ({ name }));
+  }
+
+  function edgeColor(type) {
+    if (type === "Requires") {
+      return "#8bd5ca";
+    }
+
+    if (type === "Extends") {
+      return "#c6a0f6";
+    }
+
+    return "#8aadf4";
+  }
+
+  function formatEdgeTooltip(edge) {
+    const detail = edge.type === "Requires" && edge.moduleName
+      ? `<br/>module: ${edge.moduleName}${edge.isResolved === false ? " (unresolved)" : ""}`
+      : "";
+
+    return `${edge.source} → ${edge.target}<br/>${edge.type}${detail}`;
   }
 
   function selectNode(id, shouldFocus) {
@@ -534,7 +576,7 @@
       ["Kind", node.kind],
       ["名称", node.name],
       ["QualifiedName", node.qualifiedName],
-      ["文件", node.filePath || node.path],
+      [node.type === "Module" ? "来源文件" : "文件", node.filePath || node.path],
       ["行号", node.startLine ? `${node.startLine}-${node.endLine || node.startLine}` : "--"],
       ["签名", node.signature || "--"],
     ];
@@ -578,7 +620,7 @@
   }
 
   function isSymbolNode(node) {
-    return node.type === "Symbol" || node.kind !== "File";
+    return node.type === "Symbol";
   }
 
   function showMessage(text, isError) {

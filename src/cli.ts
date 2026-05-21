@@ -24,8 +24,8 @@ const queryHelpText = `
   callees:<symbol>           查询该符号调用了谁，用于看内部依赖
   extends:<symbol>           查询该符号继承的父级
   subclasses:<symbol>        查询继承该符号的子级
-  requires:<file>            查询文件 require 了哪些项目内文件
-  dependents:<file>          查询哪些文件 require 了该文件
+  requires:<path-part>       查询路径片段匹配的文件 require 了哪些项目内文件
+  dependents:<path-part>     查询哪些文件 require 了路径片段匹配的文件
   kind:<kind> name:<symbol>  组合过滤
 
 示例:

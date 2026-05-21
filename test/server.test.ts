@@ -27,15 +27,15 @@ describe("serve API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
-      fileCount: 1,
-      symbolCount: 2,
-      edgeCount: 2,
+      fileCount: 3,
+      symbolCount: 3,
+      edgeCount: 6,
       parseErrorCount: 0,
       pendingSyncChangeCount: 0,
     });
   });
 
-  it("返回 File、Symbol 和 Contains 图数据", async () => {
+  it("返回 File、Symbol 和可视化关系图数据", async () => {
     const projectRoot = await createIndexedProject();
     const server = await createTestServer(projectRoot);
 
@@ -56,6 +56,12 @@ describe("serve API", () => {
           filePath: "src/player.lua",
           startLine: 1,
         }),
+        expect.objectContaining({
+          id: 'module:src/main.lua:"base." .. name',
+          type: "Module",
+          kind: "module",
+          label: '"base." .. name',
+        }),
       ]),
     );
     expect(response.body.edges).toEqual(
@@ -63,6 +69,25 @@ describe("serve API", () => {
         expect.objectContaining({
           source: "src/player.lua",
           kind: "Contains",
+        }),
+        expect.objectContaining({
+          source: expect.stringContaining("#class#Player#"),
+          target: expect.stringContaining("#class#Base#"),
+          kind: "Extends",
+        }),
+        expect.objectContaining({
+          source: "src/main.lua",
+          target: "src/player.lua",
+          kind: "Requires",
+          moduleName: "src.player",
+          isResolved: true,
+        }),
+        expect.objectContaining({
+          source: "src/main.lua",
+          target: 'module:src/main.lua:"base." .. name',
+          kind: "Requires",
+          moduleName: '"base." .. name',
+          isResolved: false,
         }),
       ]),
     );
@@ -101,7 +126,7 @@ describe("serve API", () => {
         path: "src/player.lua",
         startLine: 1,
         endLine: 3,
-        code: 'Player = class("Player")\nfunction Player:move()\nend',
+        code: 'Player = setmetatable({}, { __index = Base })\nfunction Player:move()\nend',
       },
     });
   });
@@ -170,7 +195,7 @@ describe("serve API", () => {
 
       const status = await fetchJson(`${server.url}/api/status`);
       expect(status.status).toBe(200);
-      expect(status.body.fileCount).toBe(1);
+      expect(status.body.fileCount).toBe(3);
     } finally {
       vi.doUnmock("node:fs/promises");
       vi.resetModules();
@@ -186,8 +211,10 @@ async function createIndexedProject(): Promise<string> {
   await writeProjectFile(
     projectRoot,
     "src/player.lua",
-    'Player = class("Player")\nfunction Player:move()\nend\n',
+    'Player = setmetatable({}, { __index = Base })\nfunction Player:move()\nend\n',
   );
+  await writeProjectFile(projectRoot, "src/base.lua", 'Base = class("Base")\n');
+  await writeProjectFile(projectRoot, "src/main.lua", 'require("src.player")\nrequire("base." .. name)\n');
   await initializeProject(projectRoot);
   await indexProject(projectRoot);
 
