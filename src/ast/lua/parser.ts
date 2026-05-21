@@ -62,7 +62,7 @@ function createLuaContext(filePath: NormalizedPath, source: string): LuaContext 
     filePath,
     source,
     lines: source.split(/\r\n|\n|\r/),
-    rootNode: luaParser.parse(source).rootNode,
+    rootNode: luaParser.parse((offset) => source.slice(offset, offset + 4096)).rootNode,
   };
 }
 

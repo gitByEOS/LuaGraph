@@ -79,16 +79,29 @@ describe("graph output formatters", () => {
   it("extends table 和 tree 展示继承关系", () => {
     expect(formatQueryResult(createExtendsResult(), "table")).toBe(
       [
-        "+--------+-------+--------------+------+-----------+",
-        "| Parent | Kind  | File         | Line | Signature |",
-        "+--------+-------+--------------+------+-----------+",
-        "| Base   | table | src/base.lua | 1    | Base = {} |",
-        "+--------+-------+--------------+------+-----------+",
+        "+-------+--------+-----------------+----------------+",
+        "| Child | Parent | Child File      | Parent File    |",
+        "+-------+--------+-----------------+----------------+",
+        "| Child | Base   | src/child.lua:1 | src/base.lua:1 |",
+        "+-------+--------+-----------------+----------------+",
         "1 rows, target: Child (src/child.lua:1)",
       ].join("\n"),
     );
     expect(formatQueryResult(createExtendsResult(), "tree")).toBe(
       ["Child()  (src/child.lua:1)", "└── extends Base [src/base.lua:1]"].join("\n"),
+    );
+  });
+
+  it("requires table 同时展示来源和目标文件", () => {
+    expect(formatQueryResult(createRequiresResult(), "table")).toBe(
+      [
+        "+----------------+---------------+--------+----------+",
+        "| Requiring File | Required File | Module | Resolved |",
+        "+----------------+---------------+--------+----------+",
+        "| src/main.lua   | src/utils.lua | utils  | true     |",
+        "+----------------+---------------+--------+----------+",
+        "1 rows, target: *",
+      ].join("\n"),
     );
   });
 
@@ -147,6 +160,16 @@ describe("graph output formatters", () => {
         "leaf()  (src/api.lua:1)",
         "└── called by middle() [src/api.lua:4]",
         "    └── called by appBoot() [src/app.lua:2]",
+      ].join("\n"),
+    );
+  });
+
+  it("impact tree 展示反向 Extends 子类", () => {
+    expect(formatImpactResult(createExtendsImpactResult(), "tree")).toBe(
+      [
+        "Base()  (src/base.lua:1)",
+        "└── subclass Child [src/child.lua:1]",
+        "    └── subclass GrandChild [src/grand.lua:1]",
       ].join("\n"),
     );
   });
@@ -264,6 +287,32 @@ function createExtendsResult(): LuaGraphQueryResult {
   };
 }
 
+function createRequiresResult(): LuaGraphQueryResult {
+  return {
+    projectRoot: "/tmp/project",
+    expression: "requires:*",
+    count: 1,
+    nodes: [
+      {
+        type: "File",
+        id: "src/utils.lua",
+        kind: "file",
+        name: "utils.lua",
+        path: "src/utils.lua",
+      },
+    ],
+    edges: [
+      {
+        kind: "Requires",
+        source: "src/main.lua",
+        target: "src/utils.lua",
+        moduleName: "utils",
+        isResolved: true,
+      },
+    ],
+  };
+}
+
 function createImpactResult(): LuaGraphImpactResult {
   const leaf = createSymbol("src/api.lua#function#leaf#1:1", "leaf", "src/api.lua", 1);
   const middle = createSymbol("src/api.lua#function#middle#3:1", "middle", "src/api.lua", 3);
@@ -280,6 +329,26 @@ function createImpactResult(): LuaGraphImpactResult {
     edges: [
       createEdge(middle.id, leaf.id, 4),
       createEdge(appBoot.id, middle.id, 2),
+    ],
+  };
+}
+
+function createExtendsImpactResult(): LuaGraphImpactResult {
+  const base = createSymbol("src/base.lua#class#Base#1:1", "Base", "src/base.lua", 1);
+  const child = createSymbol("src/child.lua#class#Child#1:1", "Child", "src/child.lua", 1);
+  const grandChild = createSymbol("src/grand.lua#class#GrandChild#1:1", "GrandChild", "src/grand.lua", 1);
+
+  return {
+    projectRoot: "/tmp/project",
+    input: "Base",
+    depth: 2,
+    seeds: [base],
+    count: 2,
+    nodes: [child, grandChild],
+    files: ["src/child.lua", "src/grand.lua"],
+    edges: [
+      createExtendsEdge(child.id, base.id),
+      createExtendsEdge(grandChild.id, child.id),
     ],
   };
 }

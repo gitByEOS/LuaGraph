@@ -147,6 +147,31 @@ describe("queryProject", () => {
     expect(result.edges).toHaveLength(2);
   });
 
+  it("extends:* 和 subclasses:* 查询所有 Extends 边", async () => {
+    const projectRoot = await createTempProject();
+
+    await writeLuaFile(
+      projectRoot,
+      "SlotsNew/delegate.lua",
+      [
+        "SlotsBaseDelegate = {}",
+        "SlotsMarketDelegate = class('SlotsMarketDelegate', SlotsBaseDelegate)",
+        "SlotsSystemDelegate = class('SlotsSystemDelegate', SlotsBaseDelegate)",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const extendsResult = await queryProject(projectRoot, "extends:*");
+    const subclassesResult = await queryProject(projectRoot, "subclasses:*");
+
+    expect(extendsResult.edges).toEqual([
+      { kind: "Extends", source: expect.stringContaining("SlotsMarketDelegate"), target: expect.stringContaining("SlotsBaseDelegate") },
+      { kind: "Extends", source: expect.stringContaining("SlotsSystemDelegate"), target: expect.stringContaining("SlotsBaseDelegate") },
+    ]);
+    expect(subclassesResult.edges).toEqual(extendsResult.edges);
+  });
+
   it("查询 requires 和 dependents 文件依赖", async () => {
     const projectRoot = await createTempProject();
     await writeLuaFile(projectRoot, "src/main.lua", 'local utils = require("utils")\n');
@@ -210,6 +235,58 @@ describe("queryProject", () => {
       "SlotsNew/feature/ThemeExpandSymbolFeature.lua",
     ]);
     expect(dependentsResult.edges).toHaveLength(2);
+  });
+
+  it("requires:* 查询所有 Requires 边", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "src/main.lua", 'require("utils")\n');
+    await writeLuaFile(projectRoot, "src/feature.lua", 'require("utils")\n');
+    await writeLuaFile(projectRoot, "src/utils.lua", "local M = {}\nreturn M\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await queryProject(projectRoot, "requires:*");
+
+    expect(result.edges).toEqual([
+      expect.objectContaining({
+        source: "src/feature.lua",
+        target: "src/utils.lua",
+        isResolved: true,
+      }),
+      expect.objectContaining({
+        source: "src/main.lua",
+        target: "src/utils.lua",
+        isResolved: true,
+      }),
+    ]);
+  });
+
+  it("requires 解析项目根别名前缀和 .lua 后缀", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "feature/ThemeExpandSymbolFeature.lua", "require 'SlotsNew.feature.ThemeFeatureBase'\n");
+    await writeLuaFile(projectRoot, "component/ThemeBigWinEffectComponent_v2.lua", 'require "SlotsNew.component.ThemeBigWinView.lua"\n');
+    await writeLuaFile(projectRoot, "feature/ThemeFeatureBase.lua", "ThemeFeatureBase = {}\n");
+    await writeLuaFile(projectRoot, "component/ThemeBigWinView.lua", "ThemeBigWinView = {}\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const prefixedResult = await queryProject(projectRoot, "requires:ThemeExpandSymbolFeature");
+    const luaSuffixResult = await queryProject(projectRoot, "requires:ThemeBigWinEffectComponent_v2");
+
+    expect(prefixedResult.edges).toEqual([
+      expect.objectContaining({
+        source: "feature/ThemeExpandSymbolFeature.lua",
+        target: "feature/ThemeFeatureBase.lua",
+        isResolved: true,
+      }),
+    ]);
+    expect(luaSuffixResult.edges).toEqual([
+      expect.objectContaining({
+        source: "component/ThemeBigWinEffectComponent_v2.lua",
+        target: "component/ThemeBigWinView.lua",
+        isResolved: true,
+      }),
+    ]);
   });
 
   it("requires 和 dependents 兼容 ./ 和绝对路径查询", async () => {

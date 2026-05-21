@@ -1,341 +1,120 @@
-# LuaGraph 使用指南
+# LuaGraph 使用手册
 
-## 安装
-
-```bash
-# 1. 安装依赖
-pnpm install
-
-# 2. 构建（每次合并新代码后必须执行）
-pnpm run build
-
-# 3. 全局安装（可选，否则用 node dist/cli.js 代替 luagraph）
-pnpm link --global
-```
-
-未全局安装时，所有 `luagraph` 命令改用 `node dist/cli.js`：
+## 运行入口
 
 ```bash
-node dist/cli.js init <path>        # 代替 luagraph init
-node dist/cli.js status             # 代替 luagraph status，默认当前目录
-node dist/cli.js status <path>      # 显式查看指定项目
-node dist/cli.js index <path>       # 代替 luagraph index
-node dist/cli.js sync <path>        # 代替 luagraph sync
-node dist/cli.js sample             # 代替 luagraph sample，默认当前目录
-node dist/cli.js sample <path>      # index 后抽查指定项目
-node dist/cli.js query name:init    # 代替 luagraph query
-node dist/cli.js impact init        # 代替 luagraph impact
-node dist/cli.js serve <path>       # 启动本地可视化服务
+pnpm install                         # 安装依赖，含 tree-sitter 和 Kuzu。
+pnpm run build                       # 生成 dist/cli.js 和 Web 静态资源。
+pnpm link --global                   # 可选：把 luagraph 注册到全局命令。
+node dist/cli.js <cmd>               # 未 link 时使用本地 CLI。
 ```
 
-## 模块结构
-
-源码按边界分为四层：`src/cli/` 负责命令装配，`src/web/` 负责本地可视化服务和静态资产，`src/core/` 负责产品层流程、配置、查询和存储，`src/ast/` 负责语言无关中间表示与语言适配器。当前 Lua 实现位于 `src/ast/lua/`，JavaScript 与 TypeScript 目录仅保留适配器占位说明。
-
-根入口 `src/cli.ts` 只转发到 `src/cli/cli.ts`，因此构建后的 `dist/cli.js` 路径保持不变；公共库出口仍使用 `src/lib.ts`。
-
-## 使用方式
-
-### 1. 初始化项目
-
-在目标 Lua 项目根目录初始化 LuaGraph 配置和图数据库：
+## 项目初始化
 
 ```bash
-# 方式 1：直接指定路径
-luagraph init /path/to/your/lua/project
-
-# 方式 2：相对路径
-cd /path/to/your/lua/project
-luagraph init .
+luagraph init <lua-project>          # 写入 <lua-project>/.luagraph/config.json。
+luagraph init .                      # 当前目录作为 Lua 项目根。
 ```
 
-会创建：
-- `.luagraph/config.json` — 扫描配置（include/exclude 规则）
-- `.luagraph/kuzu/` — Kuzu 图数据库目录
+`.luagraph/config.json` 控制扫描范围：`include` 默认 `**/*.lua`，`exclude` 默认 `.luagraph/**`。
 
-### 2. 索引 Lua 符号
+`.luagraph/kuzu/` 保存图数据库；删除后需重新 `index`。
 
-扫描指定模式的 Lua 文件，提取 class/table/function/method 符号、可解析 Calls 关系、确定的 Extends 关系和文件级 Requires 关系并写入 Kuzu：
+## 索引与刷新
 
 ```bash
-# 索引目标项目
-luagraph index /path/to/your/lua/project
-
-# 强制重建并输出 JSON
-luagraph index /path/to/your/lua/project --force --format json
+luagraph index <project> --force     # 删除旧库并重建 File、Symbol、Contains、Calls、Extends、Requires。
+luagraph index <project> --quiet     # 只执行索引，不输出进度。
+luagraph sync <project>              # 按 contentHash 刷新增、修改、删除的 Lua 文件。
+luagraph status <project>            # 输出节点数、关系数、分类计数、待同步数量。
+luagraph sample <project> --limit 20 # 抽查已写入 Kuzu 的 Symbol。
 ```
 
-输出 JSON：
-```json
-{
-  "fileCount": 18,
-  "symbolCount": 42,
-  "containsCount": 42,
-  "callsCount": 12,
-  "extendsCount": 2,
-  "requiresCount": 6,
-  "databaseDir": "/path/to/.luagraph/kuzu"
-}
-```
+`index` 和 `sync` 的 `requiresCount` 是写入的 require 表达式数，不等于已解析文件边数。
 
-### 3. 增量刷新索引
+`Requires.isResolved=false` 表示目标文件未在当前项目扫描范围内，常见原因是外部库、缺文件、模块名动态拼接。
 
-`sync` 基于 contentHash 处理新增、变更和删除的 Lua 文件，并刷新相关 Symbol、Contains、Calls、Extends 和 Requires 数据。无参数时默认使用当前目录：
+## 查询语法
 
 ```bash
-luagraph sync
-luagraph sync /path/to/your/lua/project --format json
-luagraph sync /path/to/your/lua/project --format table
-luagraph sync /path/to/your/lua/project --quiet
+luagraph query name:init                         # 精确匹配 symbol.name 或 symbol.qualifiedName。
+luagraph query kind:class                        # 查询指定 Symbol kind；kind:file 查询 File。
+luagraph query callers:init --depth 2            # 反向 Calls：谁调用 init。
+luagraph query callees:init --format tree        # 正向 Calls：init 调用了谁。
+luagraph query extends:Child                     # 正向 Extends：Child 的父级。
+luagraph query subclasses:Base --depth 2         # 反向 Extends：Base 的子类。
+luagraph query requires:main --format table      # 正向 Requires：main 匹配文件 require 了谁。
+luagraph query dependents:utils --format table   # 反向 Requires：谁 require 了 utils 匹配文件。
+luagraph query requires:* --format table         # 输出全部 Requires 边。
+luagraph query extends:* --format table          # 输出全部 Extends 边。
 ```
 
-输出 JSON：
-```json
-{
-  "scannedFileCount": 18,
-  "changedFileCount": 2,
-  "removedFileCount": 1,
-  "symbolCount": 41,
-  "containsCount": 41,
-  "extendsCount": 2,
-  "requiresCount": 5,
-  "databaseDir": "/path/to/.luagraph/kuzu"
-}
-```
+一个 query 表达式只能包含一个关系条件：`callers`、`callees`、`extends`、`subclasses`、`requires`、`dependents`。
 
-### 4. 抽查索引结果
+`--format json` 输出 `nodes` 和 `edges`，适合排查建边字段。
 
-`sample` 和 `status` 同级，用于 index 后从 Kuzu 抽查少量 Symbol 数据，不读取源码、不做 dump、不做可视化。无参数时默认使用当前目录：
+`--format table` 输出终端表格；`requires:*` 会显示 `Requiring File`、`Required File`、`Module`、`Resolved`。
+
+`--format tree` 按关系层级展开，环路节点标记 `(cycle)`。
+
+## 影响分析
 
 ```bash
-luagraph sample
-luagraph sample /path/to/your/lua/project --limit 20 --format json
-luagraph sample /path/to/your/lua/project --format table
+luagraph impact src/api.lua --format table       # 文件输入：沿反向 Requires 找依赖文件。
+luagraph impact init --depth 2 --format tree     # 符号输入：沿反向 Calls 找调用者。
+luagraph impact Module.method --format json      # qualifiedName 输入：输出 seeds、nodes、files、edges。
 ```
 
-输出 JSON：
-```json
-{
-  "projectRoot": "/path/to/your/lua/project",
-  "count": 2,
-  "symbols": [
-    {
-      "kind": "table",
-      "name": "Player",
-      "qualifiedName": "Player",
-      "filePath": "src/player.lua",
-      "startLine": 1,
-      "isLocal": false,
-      "signature": "Player = class(\"Player\")"
-    }
-  ]
-}
-```
+`impact` 的文件影响来自 `Requires`，符号影响来自 `Calls`。
 
-### 5. 查看状态
-
-查询 Kuzu 图数据库中已存储的 File、Symbol、关系、解析错误、符号分类和待同步变化数量。无参数时默认使用当前目录：
+## 可视化服务
 
 ```bash
-luagraph status
-luagraph status /path/to/your/lua/project
-luagraph status --project-root /path/to/your/lua/project
+luagraph serve <project>                         # 启动本地 Web，端口随机。
+luagraph serve <project> --port 43210            # 固定端口。
+luagraph serve <project> --open                  # 启动后打开浏览器。
 ```
 
-输出 JSON：
-```json
-{
-  "fileCount": 18,
-  "symbolCount": 42,
-  "edgeCount": 42,
-  "parseErrorCount": 0,
-  "symbolKindCounts": {
-    "function": 10,
-    "method": 14,
-    "table": 18
-  },
-  "pendingSyncChangeCount": 0,
-  "databaseDir": "/path/to/.luagraph/kuzu",
-  "configPath": "/path/to/.luagraph/config.json",
-  "schemaCount": 8
-}
-```
+Web 只读取已索引 Kuzu；源码变更后先跑 `sync`。
 
-### 6. 查询图数据
+Web 展示 File、Symbol、Contains、Extends、Requires；点击 Symbol 通过 `/api/code` 读取源码片段。
 
-`query` 读取已索引图，支持按名称、类型、Calls、Extends 和 Requires 关系查询。表达式可以组合普通过滤条件；关系条件一次只使用一个：
+## 图模型
 
-```bash
-luagraph query name:init
-luagraph query kind:function
-luagraph query kind:file
-luagraph query callers:init --depth 2
-luagraph query callees:init --format tree
-luagraph query extends:Child --format table
-luagraph query subclasses:Base --depth 2 --format tree
-luagraph query requires:main --format json
-luagraph query dependents:utils --format json
-luagraph query name:init --project-root /path/to/your/lua/project --format table
-```
-
-支持的输出格式：
-- `json`：结构化结果，包含 `nodes` 和 `edges`；Extends 边输出 `kind: "Extends"`，Requires 边输出 `kind: "Requires"`。
-- `table`：逐行输出匹配节点，便于终端阅读。
-- `tree`：按 callers/callees/extends/subclasses/requires/dependents 关系展示层级，循环节点会标记 `(cycle)`。
-
-### 7. 分析影响范围
-
-`impact` 基于 Calls 反向关系分析调用者影响范围；输入是文件路径时，也会返回反向 Requires 依赖文件。输入可以是文件路径、符号名或 qualifiedName：
-
-```bash
-luagraph impact src/api.lua
-luagraph impact leaf --depth 1
-luagraph impact leaf --format json
-luagraph impact leaf --format table
-luagraph impact leaf --format tree
-luagraph impact leaf --project-root /path/to/your/lua/project
-```
-
-支持的输出格式：
-- `json`：结构化结果，包含种子符号、受影响符号、文件列表、Calls 边和文件级 Requires 边。
-- `table`：分段列出 seeds、affected 和 files。
-- `tree`：从输入符号向调用者方向展示影响链。
-
-### 8. 启动本地可视化
-
-`serve` 会启动内置 HTTP 服务，读取已索引的 Kuzu 图数据库并提供静态 Web UI：
-
-```bash
-luagraph serve
-luagraph serve /path/to/your/lua/project
-luagraph serve /path/to/your/lua/project --port 43210
-luagraph serve /path/to/your/lua/project --open
-```
-
-不传 `--port` 时默认使用随机可用端口，并在终端输出实际 URL。未全局安装时：
-
-```bash
-node dist/cli.js serve /path/to/your/lua/project --port 43210 --open
-```
-
-第一版能力：
-- 展示 File、Symbol 节点和 Contains、Extends、Requires 关系。
-- 搜索命中节点高亮，并保留相邻节点帮助定位结构。
-- 点击 Symbol 节点后通过 `/api/code` 读取源码片段。
-
-当前限制：
-- 需要先执行 `init` 和 `index`，索引刷新由 CLI `sync` 执行。
-- Web 读取已索引图数据。
-- Extends 仅识别确定的 `Child = setmetatable({}, { __index = Parent })` 和 `local Child = ...` 模式。
-- 不承诺 upvalue 分析。
-- 不提供前端构建链，不监听文件变化。
-
-### 9. 完整工作流示例
-
-```bash
-# 进入 LuaGraph 项目根
-cd /path/to/luagraph
-
-# 构建
-pnpm run build
-
-# 初始化
-node dist/cli.js init .
-
-# 索引
-node dist/cli.js index . --force --format json
-
-# 增量刷新
-node dist/cli.js sync . --format table
-
-# 验证当前目录
-node dist/cli.js sample
-node dist/cli.js status
-node dist/cli.js query callers:init --depth 2 --format tree
-node dist/cli.js query subclasses:Base --depth 2 --format tree
-node dist/cli.js query requires:main --format json
-node dist/cli.js impact init --format table
-
-# 查看可视化
-node dist/cli.js serve . --open
-```
-
-## 验证
-
-### 运行全部测试
-
-```bash
-npx vitest run
-```
-
-预期输出以当前测试集为准，所有用例应通过。
-
-### 按模块运行测试
-
-```bash
-npx vitest run test/indexer.test.ts    # 索引模块
-npx vitest run test/scanner.test.ts    # 扫描模块
-npx vitest run test/status.test.ts     # 状态模块
-npx vitest run test/sample.test.ts     # 抽查模块
-npx vitest run test/syncer.test.ts     # 增量同步模块
-npx vitest run test/query.test.ts      # 查询模块
-npx vitest run test/impact.test.ts     # 影响分析模块
-npx vitest run test/format.test.ts     # 输出格式模块
-npx vitest run test/verify.test.ts     # 验证模块
-```
-
-### 运行验收脚本
-
-```bash
-submit/test-agent-init.sh      # 初始化验收
-submit/test-agent-scanner.sh   # 扫描验收
-submit/test-agent-status.sh    # 状态验收
-submit/test-index.sh           # 索引验收
-submit/test-agent-verify.sh    # 完整验证（CLI 方式）
-submit/test-status-accuracy.sh # status 准确性验收
-submit/test-sample.sh          # sample 抽查验收
-submit/test-serve.sh           # serve API 和静态 UI 验收
-submit/test-parser-accuracy.sh # parser 准确性验收
-submit/test-sync-refresh.sh    # sync 增量刷新验收
-submit/test-query.sh           # query 查询验收
-submit/test-impact.sh          # impact 与格式验收
-submit/test-extends.sh         # Extends 最小闭环验收
-submit/test-requires.sh        # Requires 最小闭环验收
-submit/test-layout.sh          # 目录分层验收
-```
-
-### 快速验证（最快）
-
-```bash
-submit/test-agent-verify.sh
-```
-
-该脚本会依次执行：
-1. `luagraph init` 初始化项目
-2. `luagraph index` 索引 Lua 文件
-3. `luagraph status` 验证计数
-4. 自动检查 fileCount、symbolCount、edgeCount
-
-## Kuzu 图数据库 Schema
-
-| 节点/关系 | 说明 | 关键字段 |
+| 类型 | 方向 | 关键字段 |
 |---|---|---|
-| File | Lua 文件 | path, contentHash, size, modifiedAt |
-| Symbol | 符号（class/table/function/method） | id, kind, name, qualifiedName, filePath, startLine |
-| Contains | 文件→符号 | — |
-| Calls | 符号→符号（调用） | line, column, isResolved |
-| Extends | 符号→父级符号（最小继承） | — |
-| Requires | 文件→文件（require 依赖） | moduleName, isResolved |
+| File | 节点 | path, contentHash, size, modifiedAt |
+| Symbol | 节点 | id, kind, name, qualifiedName, filePath, startLine |
+| Contains | File -> Symbol | 无业务字段 |
+| Calls | Symbol -> Symbol | line, column, isResolved |
+| Extends | Symbol -> Symbol | source=子类, target=父级 |
+| Requires | File -> File | moduleName, isResolved |
 
-## Parser 当前支持的符号类型
+## Lua 解析范围
 
-| 类型 | Lua 模式 | kind |
-|---|---|---|
-| Class | `ClassName = class("ClassName"...)` | class |
-| Table | `TableName = {` 或 `TableName =` | table |
-| Method | `function Class:method()` | method |
-| Dot Method | `function Module.func()` | method |
-| Function | `function foo()` | function |
-| Local Function | `local function foo()` | function |
+| 能力 | 识别模式 |
+|---|---|
+| class | `ClassName = class("ClassName", Parent)` |
+| table | 根级 `TableName = {}` |
+| function | `function foo()`、`local function foo()` |
+| method | `function Class:method()`、`function Module.func()` |
+| extends | `class(..., Parent)`、`setmetatable({}, { __index = Parent })` |
+| requires | `require("a.b")`、`require 'a.b'`、`require [[a.b]]`、动态表达式 |
 
-Parser 使用行级模式，不读取 AST。Extends 仅识别 `Child = setmetatable({}, { __index = Parent })` 与 `local Child = ...` 的确定符号关系；`T.__index = T` 和动态 parent 表达式不会生成确定继承边。Requires 支持 `require("foo.bar")`、`local M = require("foo.bar")` 和动态 require 标记；动态 require 会写入 `Requires` 边，`moduleName` 保留表达式，`isResolved=false`。当前不承诺 upvalue 分析。
+Parser 基于 tree-sitter-lua；动态 require 会保留表达式并写出 `isResolved=false`。
+
+路径解析支持 `a.b`、`a/b`、`a.b.lua`、同目录模块、去掉首段别名前缀后的项目内匹配。
+
+不支持 upvalue 数据流、运行时 class 工厂、动态 parent 表达式、动态 require 目标解析。
+
+## 验证命令
+
+```bash
+npm run typecheck                   # TypeScript 类型检查。
+npx vitest run                      # 全量单测。
+submit/test-tree-sitter-lua.sh      # tree-sitter 解析和运行时 import 验收。
+submit/test-query.sh                # query 查询验收。
+submit/test-requires.sh             # Requires 最小闭环验收。
+submit/test-extends.sh              # Extends 最小闭环验收。
+submit/test-sync-refresh.sh         # sync 增量刷新验收。
+```

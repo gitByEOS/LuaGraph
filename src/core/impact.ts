@@ -6,7 +6,7 @@ import { Connection, Database, type KuzuValue, type QueryResult } from "kuzu";
 import { configPath, readConfig } from "./config.js";
 import { normalizeRepositoryPath } from "./path.js";
 import { getKuzuDatabasePath } from "./store.js";
-import type { LuaGraphImpactResult, QueryCallEdge, QueryEdge, QueryRequireEdge, QuerySymbolNode } from "./project-types.js";
+import type { LuaGraphImpactResult, QueryCallEdge, QueryEdge, QueryExtendsEdge, QueryRequireEdge, QuerySymbolNode } from "./project-types.js";
 
 export type ImpactProjectOptions = {
   readonly depth?: number;
@@ -34,13 +34,12 @@ export async function impactProject(
   const connection = new Connection(database);
 
   try {
-    const inputFilePath = normalizeInputFilePath(resolvedProjectRoot, input);
-    const seeds = await querySeeds(connection, resolvedProjectRoot, input);
-    const { nodes, edges } = await queryImpactCallers(connection, seeds, depth);
-    const requireImpact =
-      inputFilePath !== undefined && (await hasFile(connection, inputFilePath))
-        ? await queryImpactDependents(connection, inputFilePath, depth)
-        : { files: [], edges: [] };
+    const inputFilePaths = await queryInputFilePaths(connection, resolvedProjectRoot, input);
+    const seeds = await querySeeds(connection, inputFilePaths, input);
+    const callImpact = await queryImpactCallers(connection, seeds, depth);
+    const subclassImpact = await queryImpactSubclasses(connection, seeds, depth);
+    const requireImpact = await queryImpactDependentsForFiles(connection, inputFilePaths, depth);
+    const nodes = uniqueSymbols([...callImpact.nodes, ...subclassImpact.nodes]);
     const files = sortStrings([...new Set([...nodes.map((node) => node.filePath), ...requireImpact.files])]);
 
     return {
@@ -51,7 +50,7 @@ export async function impactProject(
       count: nodes.length + requireImpact.files.length,
       nodes,
       files,
-      edges: sortEdges([...edges, ...requireImpact.edges]),
+      edges: sortEdges([...callImpact.edges, ...subclassImpact.edges, ...requireImpact.edges]),
     };
   } finally {
     await connection.close();
@@ -96,6 +95,27 @@ async function queryImpactDependents(
   };
 }
 
+async function queryImpactDependentsForFiles(
+  connection: Connection,
+  filePaths: readonly string[],
+  depth: number,
+): Promise<{ readonly files: string[]; readonly edges: QueryRequireEdge[] }> {
+  const files = new Set<string>();
+  const edgesByKey = new Map<string, QueryRequireEdge>();
+
+  for (const filePath of filePaths) {
+    const result = await queryImpactDependents(connection, filePath, depth);
+
+    result.files.forEach((file) => files.add(file));
+    result.edges.forEach((edge) => edgesByKey.set(edgeKey(edge), edge));
+  }
+
+  return {
+    files: sortStrings([...files]),
+    edges: sortEdges([...edgesByKey.values()]).filter((edge): edge is QueryRequireEdge => edge.kind === "Requires"),
+  };
+}
+
 function normalizeDepth(depth: number): number {
   if (!Number.isInteger(depth) || depth < 1) {
     throw new Error("impact --depth 必须是正整数");
@@ -106,40 +126,50 @@ function normalizeDepth(depth: number): number {
 
 async function querySeeds(
   connection: Connection,
-  projectRoot: string,
+  filePaths: readonly string[],
   input: string,
 ): Promise<QuerySymbolNode[]> {
-  const filePath = normalizeInputFilePath(projectRoot, input);
+  if (filePaths.length > 0) {
+    const symbols = await Promise.all(filePaths.map((filePath) => querySymbolsInFile(connection, filePath)));
 
-  if (filePath !== undefined && (await hasFile(connection, filePath))) {
-    return querySymbolsInFile(connection, filePath);
+    return sortSymbols(symbols.flat());
   }
 
   return querySymbolsByName(connection, input);
 }
 
-function normalizeInputFilePath(projectRoot: string, input: string): string | undefined {
+async function queryInputFilePaths(
+  connection: Connection,
+  projectRoot: string,
+  input: string,
+): Promise<string[]> {
   if (!looksLikeFilePath(input)) {
-    return undefined;
+    return [];
   }
 
-  const relativePath = nodePath.isAbsolute(input) ? nodePath.relative(projectRoot, input) : input;
+  const pathQuery = normalizeInputPathQuery(projectRoot, input);
+  const rows = await queryRows(connection, "MATCH (file:File) RETURN file.path AS path;");
 
-  return normalizeRepositoryPath(relativePath);
+  return rows
+    .map((row) => readString(row.path, "path"))
+    .filter((path) => isPathQueryMatched(path, pathQuery))
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function looksLikeFilePath(input: string): boolean {
   return input.endsWith(".lua") || input.includes("/") || input.includes("\\");
 }
 
-async function hasFile(connection: Connection, filePath: string): Promise<boolean> {
-  const rows = await queryRows(
-    connection,
-    "MATCH (file:File) WHERE file.path = $path RETURN file.path AS path;",
-    { path: filePath },
-  );
+function normalizeInputPathQuery(projectRoot: string, input: string): string {
+  const pathQuery = nodePath.isAbsolute(input) ? nodePath.relative(projectRoot, input) : input;
 
-  return rows.length > 0;
+  return normalizeRepositoryPath(pathQuery).toLowerCase();
+}
+
+function isPathQueryMatched(path: string, pathQuery: string): boolean {
+  const normalizedPath = path.toLowerCase();
+
+  return normalizedPath.includes(pathQuery) || pathQuery.endsWith(`/${normalizedPath}`);
 }
 
 async function querySymbolsInFile(
@@ -216,6 +246,46 @@ async function queryImpactCallers(
   };
 }
 
+async function queryImpactSubclasses(
+  connection: Connection,
+  seeds: readonly QuerySymbolNode[],
+  depth: number,
+): Promise<{ readonly nodes: QuerySymbolNode[]; readonly edges: QueryExtendsEdge[] }> {
+  const nodesById = new Map<string, QuerySymbolNode>();
+  const edgesByKey = new Map<string, QueryExtendsEdge>();
+  const visited = new Set(seeds.map((seed) => seed.id));
+  let frontier = seeds.map((seed) => seed.id);
+
+  for (let level = 0; level < depth && frontier.length > 0; level += 1) {
+    const nextFrontier: string[] = [];
+
+    for (const targetId of frontier) {
+      const rows = await querySubclassRows(connection, targetId);
+
+      for (const row of rows) {
+        const node = toSymbolNode(row);
+        const edge = toExtendsEdge(row);
+        edgesByKey.set(edgeKey(edge), edge);
+
+        if (visited.has(node.id)) {
+          continue;
+        }
+
+        visited.add(node.id);
+        nodesById.set(node.id, node);
+        nextFrontier.push(node.id);
+      }
+    }
+
+    frontier = sortStrings(nextFrontier);
+  }
+
+  return {
+    nodes: sortSymbols([...nodesById.values()]),
+    edges: sortEdges([...edgesByKey.values()]).filter((edge): edge is QueryExtendsEdge => edge.kind === "Extends"),
+  };
+}
+
 async function queryCallerRows(
   connection: Connection,
   targetId: string,
@@ -229,6 +299,22 @@ RETURN caller.id AS id, caller.kind AS kind, caller.name AS name,
   caller.startLine AS startLine, caller.signature AS signature,
   caller.id AS edgeSource, target.id AS edgeTarget, call.line AS line,
   call.\`column\` AS callColumn, call.isResolved AS isResolved;`,
+    { targetId },
+  );
+}
+
+async function querySubclassRows(
+  connection: Connection,
+  targetId: string,
+): Promise<Record<string, unknown>[]> {
+  return queryRows(
+    connection,
+    `MATCH (subclass:Symbol)-[extend:Extends]->(target:Symbol)
+WHERE target.id = $targetId
+RETURN subclass.id AS id, subclass.kind AS kind, subclass.name AS name,
+  subclass.qualifiedName AS qualifiedName, subclass.filePath AS filePath,
+  subclass.startLine AS startLine, subclass.signature AS signature,
+  subclass.id AS edgeSource, target.id AS edgeTarget;`,
     { targetId },
   );
 }
@@ -311,6 +397,18 @@ function toRequireEdge(row: Record<string, unknown>): QueryRequireEdge {
     moduleName: readString(row.moduleName, "moduleName"),
     isResolved: readBoolean(row.isResolved, "isResolved"),
   };
+}
+
+function toExtendsEdge(row: Record<string, unknown>): QueryExtendsEdge {
+  return {
+    kind: "Extends",
+    source: readString(row.edgeSource, "edgeSource"),
+    target: readString(row.edgeTarget, "edgeTarget"),
+  };
+}
+
+function uniqueSymbols(nodes: readonly QuerySymbolNode[]): QuerySymbolNode[] {
+  return sortSymbols([...new Map(nodes.map((node) => [node.id, node])).values()]);
 }
 
 function edgeKey(edge: QueryEdge): string {

@@ -224,6 +224,23 @@ describe("Lua parser Phase 1 最小提取", () => {
     ]);
   });
 
+  it("解析超过原生字符串输入限制的大 Lua 文件", () => {
+    const source = `${"local filler = 1\n".repeat(3000)}local M = require("feature.large")\n`;
+
+    const file = parseLuaFile("src/large.lua", source);
+
+    expect(file.requires).toEqual([
+      {
+        type: "Require",
+        filePath: "src/large.lua",
+        moduleName: "feature.large",
+        isStatic: true,
+        line: 3001,
+        column: 11,
+      },
+    ]);
+  });
+
   it("用黄金样本对账函数范围和漏识别符号", () => {
     const source = [
       'Player = class("Player", Base)',

@@ -38,14 +38,14 @@ function formatQueryTable(result: LuaGraphQueryResult): string {
   const relation = parseRelationExpression(result.expression);
 
   if (relation?.key === "requires" || relation?.key === "dependents") {
-    const rows = getRequireRows(relation.key, getFileNodes(result.nodes), getRequireEdges(result.edges)).map(({ edge, node }) => [
-      node.path,
+    const rows = getRequireRows(getRequireEdges(result.edges)).map((edge) => [
+      edge.source,
+      edge.target,
       edge.moduleName,
       edge.isResolved ? "true" : "false",
     ]);
-    const title = relation.key === "requires" ? "Required File" : "Dependent File";
 
-    return [renderAsciiTable([title, "Module", "Resolved"], rows), `${rows.length} rows, target: ${relation.value}`].join("\n");
+    return [renderAsciiTable(["Requiring File", "Required File", "Module", "Resolved"], rows), `${rows.length} rows, target: ${relation.value}`].join("\n");
   }
 
   if (relation !== undefined) {
@@ -66,17 +66,15 @@ function formatQueryTable(result: LuaGraphQueryResult): string {
       );
     }
 
-    const title = relation.key === "extends" ? "Parent" : "Subclass";
-    const rows = getRelationRows(relation.key, getSymbolNodes(result.nodes), result.edges).map(({ node }) => [
-      node.qualifiedName,
-      node.kind,
-      node.filePath,
-      node.startLine,
-      node.signature,
+    const rows = getExtendsRows(getExtendsEdges(result.edges)).map((edge) => [
+      formatSymbolIdName(edge.source),
+      formatSymbolIdName(edge.target),
+      formatSymbolIdLocation(edge.source),
+      formatSymbolIdLocation(edge.target),
     ]);
     const target = formatTargetSummary(relation.value, getRelationRoots(relation.key, result.nodes, result.edges)[0]);
 
-    return [renderAsciiTable([title, "Kind", "File", "Line", "Signature"], rows), `${rows.length} rows, target: ${target}`].join(
+    return [renderAsciiTable(["Child", "Parent", "Child File", "Parent File"], rows), `${rows.length} rows, target: ${target}`].join(
       "\n",
     );
   }
@@ -144,7 +142,7 @@ function formatImpactTable(result: LuaGraphImpactResult): string {
 
 function formatImpactTree(result: LuaGraphImpactResult): string {
   const nodes = new Map([...result.seeds, ...result.nodes].map((node) => [node.id, node]));
-  const callEdges = getCallEdges(result.edges);
+  const symbolEdges = result.edges.filter((edge) => edge.kind === "Calls" || edge.kind === "Extends");
 
   if (result.seeds.length === 0) {
     return formatTargetRoot(result.input, undefined);
@@ -152,7 +150,7 @@ function formatImpactTree(result: LuaGraphImpactResult): string {
 
   return [...result.seeds]
     .sort(compareSymbols)
-    .map((seed) => renderRelationTree("callers", formatSymbolRoot(seed), seed.id, nodes, callEdges))
+    .map((seed) => renderImpactSymbolTree(formatSymbolRoot(seed), seed.id, nodes, symbolEdges))
     .join("\n\n");
 }
 
@@ -169,11 +167,6 @@ type RelationRoot = {
 type RelationRow = {
   readonly node: QuerySymbolNode;
   readonly edge: QueryEdge;
-};
-
-type RequireRow = {
-  readonly node: Extract<QueryNode, { readonly type: "File" }>;
-  readonly edge: QueryRequireEdge;
 };
 
 type TreeNode = {
@@ -222,6 +215,15 @@ function renderRelationTree(
   edges: readonly QueryEdge[],
 ): string {
   return renderTree(buildRelationTree(relation, rootLabel, rootId, nodes, edges, new Set([rootId])));
+}
+
+function renderImpactSymbolTree(
+  rootLabel: string,
+  rootId: string,
+  nodes: Map<string, QuerySymbolNode>,
+  edges: readonly QueryEdge[],
+): string {
+  return renderTree(buildImpactSymbolTree(rootLabel, rootId, nodes, edges, new Set([rootId])));
 }
 
 function renderRequireTree(
@@ -292,6 +294,37 @@ function buildRelationTree(
   return { label, children };
 }
 
+function buildImpactSymbolTree(
+  label: string,
+  originId: string,
+  nodes: Map<string, QuerySymbolNode>,
+  edges: readonly QueryEdge[],
+  path: ReadonlySet<string>,
+): TreeNode {
+  const children = getImpactSymbolChildren(originId, nodes, edges).map(({ edge, node }) =>
+    buildImpactSymbolChild(edge, node, nodes, edges, path),
+  );
+
+  return { label, children };
+}
+
+function buildImpactSymbolChild(
+  edge: QueryEdge,
+  node: QuerySymbolNode,
+  nodes: Map<string, QuerySymbolNode>,
+  edges: readonly QueryEdge[],
+  path: ReadonlySet<string>,
+): TreeNode {
+  const marker = path.has(node.id) ? " (cycle)" : "";
+  const label = `${formatImpactChildLabel(edge, node)}${marker}`;
+
+  if (path.has(node.id)) {
+    return { label, children: [] };
+  }
+
+  return buildImpactSymbolTree(label, node.id, nodes, edges, new Set([...path, node.id]));
+}
+
 function buildRelationChild(
   relation: SymbolRelationKey,
   edge: QueryEdge,
@@ -336,15 +369,22 @@ function getRelationRows(
     .sort((left, right) => compareSymbols(left.node, right.node));
 }
 
-function getRequireRows(
-  relation: "requires" | "dependents",
-  nodes: Map<string, Extract<QueryNode, { readonly type: "File" }>>,
-  edges: readonly QueryRequireEdge[],
-): RequireRow[] {
-  return edges
-    .map((edge) => ({ edge, node: nodes.get(relation === "requires" ? edge.target : edge.source) }))
-    .filter((entry): entry is RequireRow => entry.node !== undefined)
-    .sort((left, right) => left.node.path.localeCompare(right.node.path));
+function getRequireRows(edges: readonly QueryRequireEdge[]): QueryRequireEdge[] {
+  return [...edges].sort(
+    (left, right) =>
+      left.source.localeCompare(right.source) ||
+      left.target.localeCompare(right.target) ||
+      left.moduleName.localeCompare(right.moduleName),
+  );
+}
+
+function getExtendsRows(edges: readonly Extract<QueryEdge, { readonly kind: "Extends" }>[]): Extract<QueryEdge, { readonly kind: "Extends" }>[] {
+  return [...edges].sort(
+    (left, right) =>
+      formatSymbolIdName(left.source).localeCompare(formatSymbolIdName(right.source)) ||
+      formatSymbolIdName(left.target).localeCompare(formatSymbolIdName(right.target)) ||
+      left.source.localeCompare(right.source),
+  );
 }
 
 function getRelationChildren(
@@ -357,6 +397,18 @@ function getRelationChildren(
     .filter((edge) => isEdgeForRelation(relation, edge))
     .filter((edge) => (isReverseRelation(relation) ? edge.target === originId : edge.source === originId))
     .map((edge) => ({ edge, node: nodes.get(getRelationNodeId(relation, edge)) }))
+    .filter((entry): entry is RelationRow => isSymbolNode(entry.node))
+    .sort((left, right) => compareSymbols(left.node, right.node));
+}
+
+function getImpactSymbolChildren(
+  originId: string,
+  nodes: Map<string, QuerySymbolNode>,
+  edges: readonly QueryEdge[],
+): RelationRow[] {
+  return edges
+    .filter((edge) => (edge.kind === "Calls" || edge.kind === "Extends") && edge.target === originId)
+    .map((edge) => ({ edge, node: nodes.get(edge.source) }))
     .filter((entry): entry is RelationRow => isSymbolNode(entry.node))
     .sort((left, right) => compareSymbols(left.node, right.node));
 }
@@ -396,6 +448,18 @@ function parseSymbolId(id: string): { readonly filePath: string; readonly line: 
   }
 
   return { filePath: id.slice(0, id.indexOf("#")), line };
+}
+
+function formatSymbolIdName(id: string): string {
+  const segments = id.split("#");
+
+  return segments[2] ?? id;
+}
+
+function formatSymbolIdLocation(id: string): string {
+  const parsed = parseSymbolId(id);
+
+  return parsed === undefined ? id : `${parsed.filePath}:${parsed.line}`;
 }
 
 function parseRelationExpression(
@@ -454,6 +518,10 @@ function getRequireEdges(edges: readonly QueryEdge[]): QueryRequireEdge[] {
   return edges.filter((edge): edge is QueryRequireEdge => edge.kind === "Requires");
 }
 
+function getExtendsEdges(edges: readonly QueryEdge[]): Extract<QueryEdge, { readonly kind: "Extends" }>[] {
+  return edges.filter((edge): edge is Extract<QueryEdge, { readonly kind: "Extends" }> => edge.kind === "Extends");
+}
+
 function formatQueryNodeLine(node: QueryNode): string {
   if (node.type === "File") {
     return `${node.kind} ${node.path}`;
@@ -479,6 +547,10 @@ function formatTargetRoot(target: string, root: RelationRoot | undefined): strin
 }
 
 function formatTargetSummary(target: string, root: RelationRoot | undefined): string {
+  if (target === "*") {
+    return target;
+  }
+
   return `${target}${root?.filePath === undefined ? "" : ` (${root.filePath}:${root.line})`}`;
 }
 
@@ -496,6 +568,18 @@ function formatRelationChildLabel(relation: SymbolRelationKey, edge: QueryEdge, 
   const prefix = relation === "extends" ? "extends" : "subclass";
 
   return `${prefix} ${node.qualifiedName} [${node.filePath}:${node.startLine}]`;
+}
+
+function formatImpactChildLabel(edge: QueryEdge, node: QuerySymbolNode): string {
+  if (edge.kind === "Extends") {
+    return `subclass ${node.qualifiedName} [${node.filePath}:${node.startLine}]`;
+  }
+
+  if (edge.kind === "Calls") {
+    return `called by ${formatCallableName(node.qualifiedName)} [${node.filePath}:${edge.line}]`;
+  }
+
+  return node.qualifiedName;
 }
 
 function isCallRelation(relation: SymbolRelationKey): boolean {

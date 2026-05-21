@@ -316,6 +316,10 @@ function isPathQueryMatched(path: string, pathQuery: string): boolean {
   const normalizedPath = path.toLowerCase();
   const normalizedQuery = normalizePathQuery(pathQuery);
 
+  if (normalizedQuery === "*") {
+    return true;
+  }
+
   return (
     normalizedPath.includes(normalizedQuery) ||
     normalizedQuery.endsWith(`/${normalizedPath}`)
@@ -333,6 +337,18 @@ async function querySeedSymbols(
   connection: Connection,
   name: string,
 ): Promise<QuerySymbolNode[]> {
+  if (name === "*") {
+    const rows = await queryRows(
+      connection,
+      `MATCH (symbol:Symbol)
+RETURN symbol.id AS id, symbol.kind AS kind, symbol.name AS name,
+  symbol.qualifiedName AS qualifiedName, symbol.filePath AS filePath,
+  symbol.startLine AS startLine, symbol.signature AS signature;`,
+    );
+
+    return rows.map(toSymbolNode);
+  }
+
   const rows = await queryRows(
     connection,
     `MATCH (symbol:Symbol)

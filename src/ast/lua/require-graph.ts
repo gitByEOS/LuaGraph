@@ -69,10 +69,11 @@ function resolveModulePath(
   moduleName: string,
   filePaths: readonly NormalizedPath[],
 ): NormalizedPath | undefined {
-  const modulePath = moduleName.replace(/\./g, "/");
+  const modulePath = normalizeModulePath(moduleName);
   const candidates = [
     `${modulePath}.lua`,
     `${modulePath}/init.lua`,
+    ...createAliasFreeCandidates(modulePath),
     ...createSiblingCandidates(sourcePath, modulePath),
   ];
 
@@ -84,6 +85,16 @@ function resolveModulePath(
   }
 
   return findUniqueSuffix(filePaths, [`/${modulePath}.lua`, `/${modulePath}/init.lua`]);
+}
+
+function normalizeModulePath(moduleName: string): string {
+  return moduleName.replace(/\.lua$/, "").replace(/\./g, "/");
+}
+
+function createAliasFreeCandidates(modulePath: string): readonly string[] {
+  const aliasFreePath = modulePath.split("/").slice(1).join("/");
+
+  return aliasFreePath.length === 0 ? [] : [`${aliasFreePath}.lua`, `${aliasFreePath}/init.lua`];
 }
 
 function createSiblingCandidates(sourcePath: NormalizedPath, modulePath: string): readonly string[] {

@@ -1,10 +1,12 @@
 declare module "tree-sitter" {
   class Parser {
-    parse(source: string): Parser.Tree;
+    parse(source: string | Parser.InputReader): Parser.Tree;
     setLanguage(language: unknown): void;
   }
 
   namespace Parser {
+    type InputReader = (offset: number, position: Point) => string | null;
+
     type Point = {
       readonly row: number;
       readonly column: number;

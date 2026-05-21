@@ -184,6 +184,49 @@ describe("impactProject", () => {
       },
     ]);
   });
+
+  it("文件影响分析支持路径片段匹配", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "delegate/SlotsBaseDelegate.lua", "SlotsBaseDelegate = {}\n");
+    await writeLuaFile(projectRoot, "delegate/SlotsSystemDelegate.lua", 'require "SlotsNew.delegate.SlotsBaseDelegate"\n');
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "SlotsBaseDelegate.lua");
+
+    expect(result.seeds.map((seed) => seed.qualifiedName)).toEqual(["SlotsBaseDelegate"]);
+    expect(result.files).toEqual(["delegate/SlotsSystemDelegate.lua"]);
+    expect(result.edges).toEqual([
+      {
+        kind: "Requires",
+        source: "delegate/SlotsSystemDelegate.lua",
+        target: "delegate/SlotsBaseDelegate.lua",
+        moduleName: "SlotsNew.delegate.SlotsBaseDelegate",
+        isResolved: true,
+      },
+    ]);
+  });
+
+  it("符号影响分析包含反向 Extends 子类", async () => {
+    const projectRoot = await createTempProject();
+    await writeLuaFile(projectRoot, "delegate/SlotsBaseDelegate.lua", "SlotsBaseDelegate = {}\n");
+    await writeLuaFile(projectRoot, "delegate/SlotsSystemDelegate.lua", "SlotsSystemDelegate = class('SlotsSystemDelegate', SlotsBaseDelegate)\n");
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await impactProject(projectRoot, "SlotsBaseDelegate");
+
+    expect(result.seeds.map((seed) => seed.qualifiedName)).toEqual(["SlotsBaseDelegate"]);
+    expect(result.nodes.map((node) => node.qualifiedName)).toEqual(["SlotsSystemDelegate"]);
+    expect(result.files).toEqual(["delegate/SlotsSystemDelegate.lua"]);
+    expect(result.edges).toEqual([
+      {
+        kind: "Extends",
+        source: expect.stringContaining("SlotsSystemDelegate"),
+        target: expect.stringContaining("SlotsBaseDelegate"),
+      },
+    ]);
+  });
 });
 
 async function createIndexedProject(): Promise<string> {
