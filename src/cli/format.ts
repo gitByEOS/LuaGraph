@@ -250,7 +250,7 @@ function formatExplainText(result: LuaGraphExplainResult): string {
     "## Internal Logic",
     formatExplainMainLogic(result),
     "",
-    "## Data Flow",
+    result.target.type === "file" ? "## Top Method Flow" : "## Data Flow",
     formatExplainDataFlowSection(result),
     "",
     "## External Contracts",
@@ -326,23 +326,46 @@ function formatExplainDataFlowSection(result: LuaGraphExplainResult): string {
     return `- ${EXPLAIN_EMPTY_VALUE}`;
   }
 
-  return result.dataFlow.map((step) => `- ${formatExplainDataFlowStep(step, result.input)}`).join("\n");
+  const steps = result.target.type === "file" ? result.dataFlow.slice(0, EXPLAIN_ENTRYPOINT_LIMIT) : result.dataFlow;
+  const lines = steps.map((step) => `- ${formatExplainDataFlowStep(step, result.input)}`);
+
+  if (result.target.type === "file" && result.dataFlow.length > EXPLAIN_ENTRYPOINT_LIMIT) {
+    lines.push("- ...");
+  }
+
+  return lines.join("\n");
 }
 
 function formatExplainDataFlowStep(step: ExplainDataFlowStep, input: string): string {
   if (step.source === "input") {
-    return `input ${input}`;
+    return step.label.startsWith("input ") ? step.label : `input ${input}`;
   }
 
   if (step.source === "entrypoint") {
-    return `entrypoint ${stripExplainDataFlowLabel(step.label, "入口")}`;
+    return `method ${stripExplainDataFlowLabel(step.label, "入口")}`;
   }
 
-  if (step.source === "callee") {
+  if (step.source === "top-method") {
+    return step.label;
+  }
+
+  if (step.source === "assignment") {
+    return `assign ${step.label}`;
+  }
+
+  if (step.source === "branch") {
+    return `branch ${step.label}`;
+  }
+
+  if (step.source === "state") {
+    return `state/write ${step.label}`;
+  }
+
+  if (step.source === "call" || step.source === "callee") {
     return `call ${stripExplainDataFlowLabel(step.label, "调用")}`;
   }
 
-  return step.label;
+  return `return ${stripExplainDataFlowLabel(step.label, "return")}`;
 }
 
 function formatExplainExternalContracts(result: LuaGraphExplainResult): string {

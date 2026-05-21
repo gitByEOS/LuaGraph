@@ -58,12 +58,8 @@ describe("explainProject", () => {
         isResolved: true,
       },
     ]);
-    expect(result.dataFlow.map((step) => step.source)).toEqual([
-      "input",
-      "entrypoint",
-      "callee",
-      "return",
-    ]);
+    expect(result.dataFlow.map((step) => step.source)).toEqual(["top-method"]);
+    expect(result.dataFlow.map((step) => step.label)).toContain("boot");
     expect(result.externalGaps).toEqual([
       "外部依赖需查看: utils -> src/utils.lua",
       "外部函数需查看: helper -> src/utils.lua",
@@ -83,6 +79,115 @@ describe("explainProject", () => {
     });
     expect(result.entrypoints[0]?.qualifiedName).toBe("boot");
     expect(result.flow[0]?.calls.map((call) => call.to)).toEqual(["helper"]);
+  });
+
+  it("按 Lua method 抽取参数、分支、写状态和调用副作用", async () => {
+    const projectRoot = await createTempProject();
+    await writeSource(
+      projectRoot,
+      "src/SlotsControl.lua",
+      [
+        "SlotsControl = {}",
+        "function SlotsControl:ctor()",
+        "  self._spinData = nil",
+        "end",
+        "function SlotsControl:oncmd(cmd, data)",
+        "  if cmd == 'spin' then",
+        "    data = data['list'][1]",
+        "    data = self:modifyRecvData(data)",
+        "    self._spinData = data",
+        "    self:dispatchEvent('spin', data)",
+        "  elseif cmd == 'switch' then",
+        "    self:_checkSwitchFeature(data)",
+        "  end",
+        "end",
+        "function SlotsControl:requestSpinData()",
+        "  return self._spinData",
+        "end",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await explainProject(projectRoot, "SlotsControl:oncmd");
+    const labels = result.dataFlow.map((step) => step.label).join("\n");
+
+    expect(result.dataFlow.map((step) => step.source)).toEqual(
+      expect.arrayContaining(["input", "entrypoint", "branch", "assignment", "state", "call", "return"]),
+    );
+    expect(labels).toContain("cmd, data");
+    expect(labels).toContain("cmd == 'spin'");
+    expect(labels).toContain("data = data['list'][1]");
+    expect(labels).toContain("modifyRecvData");
+    expect(labels).toContain("self._spinData = data");
+    expect(labels).toContain("dispatchEvent");
+    expect(labels).toContain("_checkSwitchFeature");
+  });
+
+  it("按 TS function 抽取 require 查询的数据流摘要", async () => {
+    const projectRoot = await createTempProject();
+    await writeSource(
+      projectRoot,
+      "src/query.ts",
+      [
+        "type Row = { id: string };",
+        "export async function queryProject(connection: unknown) {",
+        "  return executeRequireQuery(connection, { key: 'requires', value: 'src' }, 2);",
+        "}",
+        "function executeQuery(connection: unknown) {",
+        "  return queryProject(connection);",
+        "}",
+        "async function executeRequireQuery(connection: unknown, relationTerm: { key: string; value: string }, depth: number) {",
+        "  const nodesById = new Map<string, Row>();",
+        "  const edgesByKey = new Map<string, Row>();",
+        "  const seedPaths = await queryRequireSeedPaths(connection, relationTerm.value);",
+        "  const visited = new Set(seedPaths);",
+        "  let frontier = seedPaths;",
+        "  for (let level = 0; level < depth && frontier.length > 0; level += 1) {",
+        "    const nextFrontier: string[] = [];",
+        "    for (const originPath of frontier) {",
+        "      const rows = await queryRequireRows(connection, relationTerm.key, originPath);",
+        "      for (const row of rows) {",
+        "        const node = toFileNode(row);",
+        "        const edge = toRequireEdge(row);",
+        "        nodesById.set(node.id, node);",
+        "        edgesByKey.set(edge.id, edge);",
+        "        if (!visited.has(node.id)) {",
+        "          visited.add(node.id);",
+        "          nextFrontier.push(node.id);",
+        "        }",
+        "      }",
+        "    }",
+        "    frontier = nextFrontier;",
+        "  }",
+        "  return { nodes: sortNodes([...nodesById.values()]), edges: sortEdges([...edgesByKey.values()]) };",
+        "}",
+        "async function queryRequireSeedPaths(_connection: unknown, _path: string) { return ['src/a.ts']; }",
+        "async function queryRequireRows(_connection: unknown, _key: string, _path: string) { return []; }",
+        "function toFileNode(row: Row) { return row; }",
+        "function toRequireEdge(row: Row) { return row; }",
+        "function sortNodes(rows: Row[]) { return rows; }",
+        "function sortEdges(rows: Row[]) { return rows; }",
+      ].join("\n"),
+    );
+    await initializeProject(projectRoot);
+    await indexProject(projectRoot);
+
+    const result = await explainProject(projectRoot, "executeRequireQuery");
+    const labels = result.dataFlow.map((step) => step.label).join("\n");
+
+    expect(labels).toContain("connection, relationTerm, depth");
+    expect(labels).toContain("seedPaths");
+    expect(labels).toContain("frontier");
+    expect(labels).toContain("visited");
+    expect(labels).toContain("queryRequireRows");
+    expect(labels).toContain("node = toFileNode(row)");
+    expect(labels).toContain("edge = toRequireEdge(row)");
+    expect(labels).toContain("nodesById.set");
+    expect(labels).toContain("edgesByKey.set");
+    expect(labels).toContain("nextFrontier.push");
+    expect(labels).toContain("sortNodes");
+    expect(labels).toContain("sortEdges");
   });
 
   it("识别 JS/TS 分支和 import 缺口", async () => {

@@ -43,6 +43,11 @@ type ExplainCallRow = {
   readonly isResolved: boolean;
 };
 
+type EntrypointScore = {
+  readonly externalCallCount: number;
+  readonly callOutCount: number;
+};
+
 type ResolvedTarget =
   | {
       readonly type: "file";
@@ -78,11 +83,12 @@ export async function explainProject(
     const source = await readFile(nodePath.join(resolvedProjectRoot, filePath), "utf8");
     const symbols = await querySymbolsInFile(connection, filePath);
     const target = createTarget(resolvedTarget, filePath);
-    const entrypoints = await createEntrypoints(connection, symbols, resolvedTarget);
-    const flow = await createFlow(connection, entrypoints, depth);
     const branches = parseBranches(source, filePath, symbols);
+    const entrypoints = await createEntrypoints(connection, symbols, resolvedTarget);
+    const topMethodEntrypoints = await createTopMethodEntrypoints(connection, symbols, resolvedTarget);
+    const flow = await createFlow(connection, entrypoints, depth);
     const dependencies = await queryDependencies(connection, filePath);
-    const dataFlow = createDataFlow(input, filePath, source, entrypoints, flow, resolvedTarget);
+    const dataFlow = createDataFlow(filePath, source, symbols, topMethodEntrypoints, flow, branches, resolvedTarget);
     const externalGaps = createExternalGaps(filePath, dependencies, flow);
 
     return {
@@ -187,14 +193,78 @@ async function createEntrypoints(
   ).slice(0, 21);
 
   return selected.map((symbol) => ({
+    ...toEntrypoint(symbol, counts.get(symbol.id) ?? 0),
+  }));
+}
+
+async function createTopMethodEntrypoints(
+  connection: Connection,
+  symbols: readonly ExplainSymbol[],
+  target: ResolvedTarget,
+): Promise<ExplainEntrypoint[]> {
+  if (target.type === "symbol") {
+    const symbol = getTargetEntrypointSymbols(target.symbol)[0];
+    return symbol === undefined ? [] : [toEntrypoint(symbol, await queryExternalCallCount(connection, symbol))];
+  }
+
+  const externalCallCounts = new Map<string, number>();
+  const callOutCounts = new Map<string, number>();
+  const candidates = symbols.filter((symbol) => symbol.kind === "function" || symbol.kind === "method");
+
+  for (const symbol of candidates) {
+    externalCallCounts.set(symbol.id, await queryExternalCallCount(connection, symbol));
+    callOutCounts.set(symbol.id, await queryCallOutCount(connection, symbol));
+  }
+
+  return sortEntrypointsByValue(candidates, externalCallCounts, callOutCounts)
+    .slice(0, 21)
+    .map((symbol) => toEntrypoint(symbol, externalCallCounts.get(symbol.id) ?? 0));
+}
+
+function toEntrypoint(symbol: ExplainSymbol, externalCallCount: number): ExplainEntrypoint {
+  return {
     name: symbol.name,
     qualifiedName: symbol.qualifiedName,
     kind: symbol.kind,
     filePath: symbol.filePath,
     startLine: symbol.startLine,
     isExported: symbol.isExported,
-    externalCallCount: counts.get(symbol.id) ?? 0,
-  }));
+    externalCallCount,
+  };
+}
+
+function sortEntrypointsByValue(
+  symbols: readonly ExplainSymbol[],
+  externalCallCounts: ReadonlyMap<string, number>,
+  callOutCounts: ReadonlyMap<string, number>,
+): ExplainSymbol[] {
+  return [...symbols].sort((left, right) => {
+    const rightScore = scoreEntrypoint(right, externalCallCounts, callOutCounts);
+    const leftScore = scoreEntrypoint(left, externalCallCounts, callOutCounts);
+
+    return (
+      sumEntrypointScore(rightScore) - sumEntrypointScore(leftScore) ||
+      rightScore.externalCallCount - leftScore.externalCallCount ||
+      rightScore.callOutCount - leftScore.callOutCount ||
+      left.startLine - right.startLine ||
+      left.qualifiedName.localeCompare(right.qualifiedName)
+    );
+  });
+}
+
+function scoreEntrypoint(
+  symbol: ExplainSymbol,
+  externalCallCounts: ReadonlyMap<string, number>,
+  callOutCounts: ReadonlyMap<string, number>,
+): EntrypointScore {
+  return {
+    externalCallCount: externalCallCounts.get(symbol.id) ?? 0,
+    callOutCount: callOutCounts.get(symbol.id) ?? 0,
+  };
+}
+
+function sumEntrypointScore(score: EntrypointScore): number {
+  return score.externalCallCount * 3 + score.callOutCount;
 }
 
 function isExplicitEntrypoint(symbol: ExplainSymbol, externalCallCount: number): boolean {
@@ -420,77 +490,270 @@ RETURN source.path AS source, target.path AS target,
 }
 
 function createDataFlow(
-  input: string,
   filePath: string,
   source: string,
+  symbols: readonly ExplainSymbol[],
   entrypoints: readonly ExplainEntrypoint[],
   flow: readonly ExplainFlow[],
+  branches: readonly ExplainBranch[],
   target: ResolvedTarget,
 ): ExplainDataFlowStep[] {
-  const entrypoint = chooseDataFlowEntrypoint(entrypoints, flow, target);
+  if (target.type === "file") {
+    return entrypoints.slice(0, 21).map((entrypoint, index) => ({
+      order: index + 1,
+      label: entrypoint.qualifiedName,
+      source: "top-method",
+      filePath: entrypoint.filePath,
+      line: entrypoint.startLine,
+    }));
+  }
+
   const steps: ExplainDataFlowStep[] = [
     {
       order: 1,
-      label: `input:${input}`,
+      label: `input ${formatInputParams(target.symbol, source)}`,
       source: "input",
       filePath,
     },
   ];
+  const selectedEntrypoints = entrypoints.slice(0, 1);
 
-  if (entrypoint !== undefined) {
+  for (const entrypoint of selectedEntrypoints) {
+    const symbol = findEntrypointSymbol(symbols, entrypoint);
+    if (symbol === undefined) {
+      continue;
+    }
+
     steps.push({
       order: steps.length + 1,
-      label: `入口 ${entrypoint.qualifiedName}`,
+      label: entrypoint.qualifiedName,
       source: "entrypoint",
       filePath: entrypoint.filePath,
       line: entrypoint.startLine,
     });
+
+    const entrypointFlow = flow.find((item) => item.entrypoint === entrypoint.qualifiedName);
+    const methodSteps = extractMethodDataFlowSteps(
+      symbol,
+      source,
+      branches,
+      entrypointFlow?.calls ?? [],
+      16,
+    );
+
+    for (const step of methodSteps) {
+      steps.push({ ...step, order: steps.length + 1 });
+    }
   }
 
-  for (const call of firstCallPath(flow.find((item) => item.entrypoint === entrypoint?.qualifiedName)?.calls ?? [])) {
+  if (steps.length === 1) {
     steps.push({
       order: steps.length + 1,
-      label: `调用 ${call.to}`,
-      source: "callee",
-      filePath: call.filePath,
-      line: call.line,
+      label: "result",
+      source: "return",
+      filePath,
     });
   }
-
-  const returnLine = findReturnLine(source, entrypoint?.startLine);
-  steps.push({
-    order: steps.length + 1,
-    label: "return result",
-    source: "return",
-    filePath,
-    ...(returnLine === undefined ? {} : { line: returnLine }),
-  });
 
   return steps;
 }
 
-function chooseDataFlowEntrypoint(
-  entrypoints: readonly ExplainEntrypoint[],
-  flow: readonly ExplainFlow[],
-  target: ResolvedTarget,
-): ExplainEntrypoint | undefined {
-  if (target.type === "symbol") {
-    return entrypoints.find((item) => item.qualifiedName === target.symbol.qualifiedName);
+function extractMethodDataFlowSteps(
+  symbol: ExplainSymbol,
+  source: string,
+  branches: readonly ExplainBranch[],
+  calls: readonly ExplainFlowCall[],
+  limit: number,
+): ExplainDataFlowStep[] {
+  const functionLines = readFunctionLines(source, symbol);
+  const callLines = new Map(flattenCallNodes(calls).map((call) => [call.line, call]));
+  const steps: ExplainDataFlowStep[] = [];
+
+  for (const branch of branches.filter((item) => item.functionName === symbol.qualifiedName)) {
+    steps.push({
+      order: 0,
+      label: branch.condition,
+      source: "branch",
+      filePath: symbol.filePath,
+      line: branch.line,
+    });
   }
 
-  const flowWithCalls = flow.find((item) => item.calls.length > 0);
+  for (const { line, text } of functionLines) {
+    const trimmed = text.trim();
+    const assignment = parseAssignmentLine(trimmed);
+    const call = callLines.get(line);
 
-  return entrypoints.find((item) => item.qualifiedName === flowWithCalls?.entrypoint) ?? entrypoints[0];
+    if (assignment !== undefined) {
+      steps.push({
+        order: 0,
+        label: assignment,
+        source: isStateWrite(assignment) ? "state" : "assignment",
+        filePath: symbol.filePath,
+        line,
+      });
+      continue;
+    }
+
+    const sideEffectCall = parseSideEffectCall(trimmed);
+    if (sideEffectCall !== undefined) {
+      steps.push({
+        order: 0,
+        label: sideEffectCall,
+        source: "call",
+        filePath: symbol.filePath,
+        line,
+      });
+      continue;
+    }
+
+    if (/^return\b/.test(trimmed)) {
+      steps.push({
+        order: 0,
+        label: trimCodeSummary(trimmed.replace(/^return\b\s*/, "")) || "result",
+        source: "return",
+        filePath: symbol.filePath,
+        line,
+      });
+      continue;
+    }
+
+    if (call !== undefined) {
+      steps.push({
+        order: 0,
+        label: call.to,
+        source: "callee",
+        filePath: call.filePath,
+        line: call.line,
+      });
+    }
+  }
+
+  if (!steps.some((step) => step.source === "return")) {
+    steps.push({
+      order: 0,
+      label: "side effects",
+      source: "return",
+      filePath: symbol.filePath,
+      line: symbol.endLine,
+    });
+  }
+
+  const uniqueSteps = uniqueDataFlowSteps(steps)
+    .sort((left, right) => (left.line ?? 0) - (right.line ?? 0) || sourcePriority(left.source) - sourcePriority(right.source))
+    .slice(0, limit);
+  const returnStep = steps.find((step) => step.source === "return");
+
+  if (returnStep !== undefined && !uniqueSteps.some((step) => step.source === "return")) {
+    return [...uniqueSteps.slice(0, Math.max(limit - 1, 0)), returnStep];
+  }
+
+  return uniqueSteps;
 }
 
-function firstCallPath(calls: readonly ExplainFlowCall[]): ExplainFlowCall[] {
-  const first = calls[0];
+function findEntrypointSymbol(
+  symbols: readonly ExplainSymbol[],
+  entrypoint: ExplainEntrypoint,
+): ExplainSymbol | undefined {
+  return symbols.find(
+    (symbol) =>
+      symbol.qualifiedName === entrypoint.qualifiedName &&
+      symbol.filePath === entrypoint.filePath &&
+      symbol.startLine === entrypoint.startLine,
+  );
+}
 
-  if (first === undefined) {
+function formatInputParams(symbol: ExplainSymbol, source: string): string {
+  const params = parseFunctionParams(symbol, source);
+
+  return params.length === 0 ? symbol.qualifiedName : params.join(", ");
+}
+
+function parseFunctionParams(symbol: ExplainSymbol, source: string): string[] {
+  const header = readFunctionLines(source, symbol)
+    .slice(0, 8)
+    .map((line) => line.text)
+    .join(" ");
+  const match = /\(([^)]*)\)/.exec(header);
+
+  if (match?.[1] === undefined) {
     return [];
   }
 
-  return [first, ...firstCallPath(first.calls)];
+  return match[1]
+    .split(",")
+    .map((param) => param.trim().replace(/[?:].*$/, "").replace(/=.*/, "").trim())
+    .filter((param) => param.length > 0);
+}
+
+function readFunctionLines(source: string, symbol: ExplainSymbol): { readonly line: number; readonly text: string }[] {
+  return source
+    .split(/\r?\n/)
+    .slice(symbol.startLine - 1, symbol.endLine)
+    .map((text, index) => ({ line: symbol.startLine + index, text }));
+}
+
+function parseAssignmentLine(trimmed: string): string | undefined {
+  if (isControlLine(trimmed) || trimmed.includes("=>")) {
+    return undefined;
+  }
+
+  if (/^[\w$.]+[:.][\w$]+\s*\(/.test(trimmed)) {
+    return undefined;
+  }
+
+  const assignment = /^(?:const|let|var|local)?\s*([\w$.[\]'"]+)(?:\s*:\s*[^=({]+)?\s*=\s*(.+)$/.exec(trimmed);
+
+  if (assignment?.[1] === undefined || assignment[2] === undefined) {
+    return undefined;
+  }
+
+  return `${assignment[1]} = ${trimCodeSummary(assignment[2])}`;
+}
+
+function parseSideEffectCall(trimmed: string): string | undefined {
+  if (isControlLine(trimmed) || /^return\b/.test(trimmed) || !trimmed.includes("(")) {
+    return undefined;
+  }
+
+  const call = /^([\w$.:]+(?:\.[\w$]+)?)\s*\((.*)\)/.exec(trimmed);
+  if (call?.[1] === undefined) {
+    return undefined;
+  }
+
+  return trimCodeSummary(trimmed);
+}
+
+function isControlLine(trimmed: string): boolean {
+  return /^(if|elseif|else if|for|while|switch|case|function|async function|end\b|\})/.test(trimmed);
+}
+
+function isStateWrite(assignment: string): boolean {
+  return /^(self|this)\./.test(assignment) || /^\w+(ById|ByKey|Map|Set)\b/.test(assignment);
+}
+
+function trimCodeSummary(value: string): string {
+  return value.replace(/[;,]\s*$/, "").trim().slice(0, 140);
+}
+
+function uniqueDataFlowSteps(steps: readonly ExplainDataFlowStep[]): ExplainDataFlowStep[] {
+  return [...new Map(steps.map((step) => [`${step.source}:${step.line}:${step.label}`, step])).values()];
+}
+
+function sourcePriority(source: ExplainDataFlowStep["source"]): number {
+  const order: Record<ExplainDataFlowStep["source"], number> = {
+    input: 0,
+    entrypoint: 1,
+    "top-method": 1,
+    branch: 2,
+    assignment: 3,
+    state: 4,
+    call: 5,
+    callee: 6,
+    return: 7,
+  };
+
+  return order[source];
 }
 
 function createExternalGaps(
@@ -578,6 +841,21 @@ RETURN caller.id AS id;`,
   return new Set(rows.map((row) => readString(row.id, "id"))).size;
 }
 
+async function queryCallOutCount(
+  connection: Connection,
+  symbol: ExplainSymbol,
+): Promise<number> {
+  const rows = await queryRows(
+    connection,
+    `MATCH (source:Symbol)-[:Calls]->(target:Symbol)
+WHERE source.id = $sourceId
+RETURN target.id AS id;`,
+    { sourceId: symbol.id },
+  );
+
+  return new Set(rows.map((row) => readString(row.id, "id"))).size;
+}
+
 async function queryCallees(
   connection: Connection,
   sourceId: string,
@@ -630,14 +908,6 @@ function findFunctionName(symbols: readonly ExplainSymbol[], line: number): stri
     .filter((symbol) => symbol.startLine <= line && line <= symbol.endLine)
     .filter((symbol) => symbol.kind === "function" || symbol.kind === "method")
     .sort((left, right) => right.startLine - left.startLine)[0]?.qualifiedName;
-}
-
-function findReturnLine(source: string, startLine: number | undefined): number | undefined {
-  const lines = source.split(/\r?\n/);
-  const offset = startLine === undefined ? 0 : Math.max(startLine - 1, 0);
-  const index = lines.findIndex((line, lineIndex) => lineIndex >= offset && /^\s*return\b/.test(line));
-
-  return index < 0 ? undefined : index + 1;
 }
 
 function normalizeDepth(depth: number): number {

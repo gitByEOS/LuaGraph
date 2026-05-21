@@ -195,7 +195,7 @@ export type ExplainDependency = {
 export type ExplainDataFlowStep = {
   readonly order: number;
   readonly label: string;
-  readonly source: "input" | "entrypoint" | "callee" | "return";
+  readonly source: "input" | "entrypoint" | "top-method" | "assignment" | "branch" | "state" | "call" | "callee" | "return";
   readonly filePath: string;
   readonly line?: number;
 };

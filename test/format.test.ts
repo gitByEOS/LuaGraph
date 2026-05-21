@@ -228,8 +228,9 @@ describe("graph output formatters", () => {
     expect(output).toContain("   - calls: helper, externalHelper");
     expect(output).toContain("     - flag -> boot");
     expect(output).toContain("- input src/main.lua");
-    expect(output).toContain("- entrypoint boot");
+    expect(output).toContain("- method boot");
     expect(output).toContain("- call helper");
+    expect(output).toContain("- return result");
     expect(output).toContain("- utils");
     expect(output).toContain("  - reason: project-dependency");
     expect(output).toContain("- externalHelper");
@@ -262,6 +263,27 @@ describe("graph output formatters", () => {
     expect(output).toContain("- ...");
   });
 
+  it("explain text 超过 20 个 Top Method Flow 时显示省略", () => {
+    const output = formatExplainResult(
+      {
+        ...createExplainResult(),
+        dataFlow: Array.from({ length: 21 }, (_, index) => ({
+          order: index + 1,
+          label: `method${index}`,
+          source: "top-method" as const,
+          filePath: "src/main.lua",
+          line: index + 1,
+        })),
+      },
+      "text",
+    );
+
+    expect(output).toContain("## Top Method Flow");
+    expect(output).toContain("- method19");
+    expect(output).not.toContain("- method20");
+    expect(output).toContain("- ...");
+  });
+
   it("explain text 空态使用 None", () => {
     const output = formatExplainResult(
       {
@@ -278,7 +300,7 @@ describe("graph output formatters", () => {
 
     expect(output).toContain("## Entry Points\n- None");
     expect(output).toContain("## Internal Logic\n1. None");
-    expect(output).toContain("## Data Flow\n- None");
+    expect(output).toContain("## Top Method Flow\n- None");
     expect(output).toContain("## External Contracts\n- None");
     expect(output).toContain("## Unresolved Runtime\n- None");
     expect(output).not.toContain("无");
