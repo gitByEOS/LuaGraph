@@ -8,6 +8,7 @@
   "files": [
     "dist"
   ],
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-web-assets.js",
